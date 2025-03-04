@@ -89,8 +89,7 @@ def main():
 
     print("\nResponse:")
     response_received = False
-    model = os.getenv("DEFAULT_MODEL")
-    for chunk in stream_response(prompt, model):
+    for chunk in stream_response(prompt):
         response_received = True
         print(chunk, end="", flush=True)
     

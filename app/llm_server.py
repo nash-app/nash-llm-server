@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 from litellm import acompletion
 import uvicorn
 import json
@@ -10,6 +11,15 @@ import os
 load_dotenv()
 
 app = FastAPI(title="Nash LLM Server")
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, specify exact origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Or specify: ["GET", "POST"]
+    allow_headers=["*"],  # Or specify required headers
+)
 
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gpt-3.5-turbo")
 

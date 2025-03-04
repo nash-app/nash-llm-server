@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 import os
 import litellm
 import uuid
+from .prompts import CHAT_SYSTEM_PROMPT, SUMMARIZE_SYSTEM_PROMPT
 
 # Load environment variables from .env file
 load_dotenv()
@@ -24,17 +25,9 @@ app.add_middleware(
 )
 
 # Constants
-DEFAULT_MODEL = "gpt-3.5-turbo"
-SYSTEM_PROMPT = "You are a helpful AI assistant."
+DEFAULT_MODEL = "gpt-4-turbo"
 MAX_MESSAGES = 20  # Maximum number of messages before suggesting summarization
-MAX_TOTAL_TOKENS = 3000  # Approximate token limit before warning
-
-SUMMARIZE_SYSTEM_PROMPT = """Summarize the key points of this conversation while preserving important context.
-Focus on maintaining:
-1. Essential information exchanged
-2. Important decisions or conclusions
-3. Current context needed for continuation
-Be concise but ensure no critical details are lost."""
+MAX_TOTAL_TOKENS = 50000  # Approximate token limit before warning
 
 # Configure LiteLLM to use Helicone proxy
 HELICONE_API_KEY = os.getenv('HELICONE_API_KEY')
@@ -137,7 +130,7 @@ async def stream_llm_response(messages: list = None, model: str = None, session_
         
         # Ensure system message is first if not already present
         if not messages or messages[0].get("role") != "system":
-            messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
+            messages.insert(0, {"role": "system", "content": CHAT_SYSTEM_PROMPT})
         
         # Check conversation length and token count
         num_messages = len(messages)
@@ -229,7 +222,7 @@ def main():
     print("\nStarting LLM server with configuration:")
     print(f"OpenAI API Key: {os.getenv('OPENAI_API_KEY')[:6]}...")
     print(f"Default Model: {DEFAULT_MODEL}")
-    print(f"System Prompt: {SYSTEM_PROMPT}")
+    print(f"System Prompt: {CHAT_SYSTEM_PROMPT}")
     print(f"Helicone API Base: {litellm.api_base}")
     
     uvicorn.run(app, host="0.0.0.0", port=8001)

@@ -158,7 +158,7 @@ async def stream_llm_response(messages: list = None, model: str = None, session_
             print(f"First message role: {messages[0]['role']}")
             print(f"Last message role: {messages[-1]['role']}")
         
-        # Send session ID only in first chunk
+        # Send session ID in first chunk
         yield f"data: {json.dumps({'session_id': session_id})}\n\n"
         
         if num_messages > MAX_MESSAGES or estimated_tokens > MAX_TOTAL_TOKENS:
@@ -179,6 +179,7 @@ async def stream_llm_response(messages: list = None, model: str = None, session_
                 }
             }
             yield f"data: {json.dumps({'warning': warning})}\n\n"
+            return
         
         litellm.headers = headers
         response = await acompletion(
@@ -195,8 +196,10 @@ async def stream_llm_response(messages: list = None, model: str = None, session_
     except Exception as e:
         print(f"\nError in stream_llm_response: {str(e)}")
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
-    
-    yield "data: [DONE]\n\n"
+    finally:
+        # Always send DONE with session ID to ensure client has it
+        yield f"data: {json.dumps({'session_id': session_id})}\n\n"
+        yield "data: [DONE]\n\n"
 
 
 @app.post("/v1/chat/completions/stream")

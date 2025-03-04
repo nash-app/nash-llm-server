@@ -70,20 +70,55 @@ The server uses Helicone for request tracking and analytics. Session handling is
 1. **Initial Request**:
 
    - Client does not need to generate or provide a session ID
-   - Server will generate a new session ID and return it in the first chunk of the response
-   - Session ID is sent as: `{"session_id": "uuid-here"}`
+   - Server generates a new session ID if none provided
+   - Server sends session ID in two places:
+     1. First chunk: `{"session_id": "uuid-here"}`
+     2. Last chunk before `[DONE]`: `{"session_id": "uuid-here"}`
 
 2. **Subsequent Requests**:
 
-   - Client should store the session ID received from the first chunk
+   - Client should store and reuse the session ID from previous responses
    - Pass the same session ID in subsequent requests to maintain conversation continuity
-   - If no session ID is provided, server will generate a new one
+   - Server will validate and return the same session ID
 
-3. **Response Format**:
-   - First chunk contains only the session ID
-   - Content chunks format: `{"content": "response text"}`
-   - Warning messages format: `{"warning": {...}}`
-   - Final chunk is always: `[DONE]`
+3. **Response Protocol**:
+
+   ```
+   data: {"session_id": "uuid-here"}
+   data: {"content": "first part of response"}
+   data: {"content": "more response text"}
+   ...
+   data: {"session_id": "uuid-here"}
+   data: [DONE]
+   ```
+
+4. **Error Handling**:
+   - If connection drops, client can retry with last known session ID
+   - Server preserves session ID even when returning warnings/errors
+   - Summarization endpoint also maintains session continuity
+
+### Best Practices for Client Implementation
+
+1. **Session Management**:
+
+   - Store session ID from first response chunk
+   - Verify it matches final chunk's session ID
+   - Reuse session ID for all requests in the conversation
+   - Pass session ID in both chat and summarize requests
+
+2. **Stream Processing**:
+
+   - Handle different chunk types appropriately:
+     - `session_id`: Update stored session ID
+     - `content`: Accumulate response text
+     - `warning`: Handle length/token warnings
+     - `error`: Handle error messages
+   - Always process until `[DONE]` marker
+
+3. **Error Recovery**:
+   - Keep last known session ID for reconnection
+   - Handle connection drops gracefully
+   - Maintain message history on client side
 
 ### Endpoints
 

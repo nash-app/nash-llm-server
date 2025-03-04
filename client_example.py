@@ -26,16 +26,16 @@ class Conversation:
     def __init__(self):
         self.messages: List[Dict[str, str]] = []
         self.session_id: str = None
-    
+
     def add_message(self, role: str, content: str):
         """Add a message to the conversation history."""
         if role not in ["user", "assistant"]:
             raise ValueError("Role must be either user or assistant")
         self.messages.append({"role": role, "content": content})
-    
+
     def get_messages(self) -> List[Dict[str, str]]:
         return self.messages.copy()
-    
+
     def set_messages(self, messages: List[Dict[str, str]]):
         """Replace current messages with new ones."""
         self.messages = messages
@@ -226,12 +226,22 @@ def chat_loop():
             
             print("\nAssistant:", end=" ", flush=True)
             full_response = ""
+            chunks = []
+            
+            # Collect all chunks and the final return value
             for chunk in stream_response(
                 conversation.get_messages(),
                 session_id=conversation.session_id
             ):
-                full_response += chunk
-                print(chunk, end="", flush=True)
+                if isinstance(chunk, tuple):
+                    # This is the final return value (full_response, session_id)
+                    if chunk[1]:  # If we got a session ID
+                        conversation.session_id = chunk[1]
+                else:
+                    # This is a content chunk
+                    full_response += chunk
+                    print(chunk, end="", flush=True)
+                    chunks.append(chunk)
             print()
             
             # Add assistant's response to history

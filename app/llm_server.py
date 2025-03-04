@@ -51,7 +51,10 @@ def get_helicone_headers(session_id: str = None) -> dict:
     headers = {}
     if HELICONE_API_KEY:
         headers["Helicone-Auth"] = f"Bearer {HELICONE_API_KEY}"
-        headers["Helicone-Session-Id"] = session_id or str(uuid.uuid4())
+        new_session = str(uuid.uuid4()) if not session_id else session_id
+        print(f"Server Debug - get_helicone_headers input session_id: {session_id}")
+        print(f"Server Debug - get_helicone_headers using session_id: {new_session}")
+        headers["Helicone-Session-Id"] = new_session
         headers["Helicone-Session-Name"] = "DIRECT"
     return headers
 
@@ -128,6 +131,8 @@ async def stream_llm_response(messages: list = None, model: str = None, session_
         if not messages:
             messages = []
         
+        print(f"\nServer Debug - stream_llm_response received session_id: {session_id}")
+        
         # Ensure system message is first if not already present
         if not messages or messages[0].get("role") != "system":
             messages.insert(0, {"role": "system", "content": CHAT_SYSTEM_PROMPT})
@@ -139,6 +144,7 @@ async def stream_llm_response(messages: list = None, model: str = None, session_
         # Get headers with session ID
         headers = get_helicone_headers(session_id)
         session_id = headers['Helicone-Session-Id']
+        print(f"Server Debug - stream_llm_response using session_id: {session_id}")
         
         print("\nMaking LLM request:")
         print(f"Session ID: {session_id}")

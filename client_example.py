@@ -47,6 +47,7 @@ def stream_response(
     session_id: str = None
 ) -> Generator[str, None, None]:
     try:
+        print(f"\nClient Debug - Sending request with session_id: {session_id}")
         payload = {
             "messages": messages,
             "session_id": session_id
@@ -74,7 +75,9 @@ def stream_response(
             return
         
         full_response = ""
-        session_id = None
+        first_session_id = None
+        last_session_id = None
+        
         for line in response.iter_lines():
             if line:
                 line = line.decode("utf-8")
@@ -111,11 +114,16 @@ def stream_response(
                                 "\nTip: Use 'summarize' to condense the "
                                 "conversation while keeping context."
                             )
-                            return None, session_id
-                        # Capture session_id from first chunk only
+                            return None, first_session_id
+                        
                         if "session_id" in parsed:
                             session_id = parsed["session_id"]
+                            if first_session_id is None:
+                                first_session_id = session_id
+                                print(f"Client Debug - First session_id: {session_id}")
+                            last_session_id = session_id
                             continue
+                            
                         content = parsed.get("content")
                         if content:
                             full_response += content
@@ -123,7 +131,13 @@ def stream_response(
                     except json.JSONDecodeError:
                         continue
         
-        return full_response, session_id
+        # Verify session IDs match
+        if first_session_id != last_session_id:
+            print("Warning: Session ID mismatch between first and last chunks")
+            return None, None
+            
+        print(f"Client Debug - Final session_id: {first_session_id}")
+        return full_response, first_session_id
     except requests.exceptions.ConnectionError:
         print("\nError: Could not connect to the LLM server.")
         print("Make sure to start it first with: poetry run llm_server")
@@ -193,6 +207,7 @@ def print_summarization_result(result: Dict) -> bool:
 def chat_loop():
     check_api_key()
     conversation = Conversation()
+    first_message = True
     
     print("Chat session started. Commands:")
     print("- 'exit': End the conversation")
@@ -223,25 +238,31 @@ def chat_loop():
             
             # Add user message to history
             conversation.add_message("user", user_input)
+            print(f"\nClient Debug - Current session_id: {conversation.session_id}")
             
             print("\nAssistant:", end=" ", flush=True)
             full_response = ""
-            chunks = []
             
-            # Collect all chunks and the final return value
+            # Only send session_id after first message
+            current_session_id = None if first_message else conversation.session_id
+            
+            # Process the stream response
+            response_chunks = []
             for chunk in stream_response(
                 conversation.get_messages(),
-                session_id=conversation.session_id
+                session_id=current_session_id
             ):
                 if isinstance(chunk, tuple):
                     # This is the final return value (full_response, session_id)
-                    if chunk[1]:  # If we got a session ID
-                        conversation.session_id = chunk[1]
+                    full_response, session_id = chunk
+                    if session_id:
+                        conversation.session_id = session_id
+                        first_message = False
                 else:
                     # This is a content chunk
                     full_response += chunk
                     print(chunk, end="", flush=True)
-                    chunks.append(chunk)
+                    response_chunks.append(chunk)
             print()
             
             # Add assistant's response to history

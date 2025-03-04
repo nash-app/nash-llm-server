@@ -24,7 +24,7 @@ black = "^24.0.0"
 
 [tool.poetry.scripts]
 llm_server = "app.llm_server:main"
-llm_client = "llm_client:main"
+client_example = "client_example:main"
 
 [tool.black]
 line-length = 120

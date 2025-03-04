@@ -1,0 +1,254 @@
+import requests
+import json
+import sys
+import os
+from typing import Generator, List, Dict
+from dotenv import load_dotenv
+
+
+def check_api_key():
+    if not os.path.exists(".env"):
+        print("Error: .env file not found.")
+        print("Please create one based on .env.example:")
+        print("cp .env.example .env")
+        print("Then edit .env with your OpenAI API key")
+        sys.exit(1)
+    
+    load_dotenv()
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        print("Error: OPENAI_API_KEY not set in .env file")
+        print("Please edit .env and add your OpenAI API key")
+        sys.exit(1)
+
+
+class Conversation:
+    def __init__(self):
+        self.messages: List[Dict[str, str]] = []
+        self.session_id: str = None
+    
+    def add_message(self, role: str, content: str):
+        """Add a message to the conversation history."""
+        if role not in ["user", "assistant"]:
+            raise ValueError("Role must be either user or assistant")
+        self.messages.append({"role": role, "content": content})
+    
+    def get_messages(self) -> List[Dict[str, str]]:
+        return self.messages.copy()
+    
+    def set_messages(self, messages: List[Dict[str, str]]):
+        """Replace current messages with new ones."""
+        self.messages = messages
+
+
+def stream_response(
+    messages: List[Dict[str, str]],
+    model: str = None,
+    session_id: str = None
+) -> Generator[str, None, None]:
+    try:
+        payload = {
+            "messages": messages,
+            "session_id": session_id
+        }
+        if model:
+            payload["model"] = model
+            
+        response = requests.post(
+            "http://localhost:8001/v1/chat/completions/stream",
+            json=payload,
+            stream=True,
+        )
+        
+        if response.status_code != 200:
+            error_msg = (
+                f"Error: Server returned status code {response.status_code}"
+            )
+            try:
+                error_data = response.json()
+                if "detail" in error_data:
+                    error_msg += f"\nDetails: {error_data['detail']}"
+            except json.JSONDecodeError:
+                pass
+            print(error_msg)
+            return
+        
+        full_response = ""
+        session_id = None
+        for line in response.iter_lines():
+            if line:
+                line = line.decode("utf-8")
+                if line.startswith("data: "):
+                    data = line[6:]  # Remove "data: " prefix
+                    if data == "[DONE]":
+                        break
+                    try:
+                        parsed = json.loads(data)
+                        if "error" in parsed:
+                            print(f"\nError: {parsed['error']}")
+                            return
+                        if "warning" in parsed:
+                            warning = parsed["warning"]
+                            print(f"\n⚠️  {warning['warning']}")
+                            print("\nSuggestions:")
+                            for i, suggestion in enumerate(
+                                warning["suggestions"], 1
+                            ):
+                                print(f"{i}. {suggestion}")
+                            
+                            details = warning["details"]
+                            limits = details["limits"]
+                            print("\nDetails:")
+                            msg_count = details["message_count"]
+                            max_msgs = limits["max_messages"]
+                            print(f"- Messages: {msg_count}/{max_msgs}")
+                            
+                            est_tokens = details["estimated_tokens"]
+                            max_tokens = limits["max_tokens"]
+                            print(f"- Est. Tokens: {est_tokens}/{max_tokens}")
+                            
+                            print(
+                                "\nTip: Use 'summarize' to condense the "
+                                "conversation while keeping context."
+                            )
+                            return None, session_id
+                        # Capture session_id from first chunk only
+                        if "session_id" in parsed:
+                            session_id = parsed["session_id"]
+                            continue
+                        content = parsed.get("content")
+                        if content:
+                            full_response += content
+                            yield content
+                    except json.JSONDecodeError:
+                        continue
+        
+        return full_response, session_id
+    except requests.exceptions.ConnectionError:
+        print("\nError: Could not connect to the LLM server.")
+        print("Make sure to start it first with: poetry run llm_server")
+        return None, None
+    except Exception as e:
+        print(f"\nError: {str(e)}")
+        return None, None
+
+
+def summarize_conversation(
+    messages: List[Dict[str, str]],
+    session_id: str = None
+) -> Dict:
+    """Request conversation summarization from the server."""
+    try:
+        response = requests.post(
+            "http://localhost:8001/v1/chat/summarize",
+            json={
+                "messages": messages,
+                "session_id": session_id
+            }
+        )
+        
+        if response.status_code != 200:
+            return {"error": f"Server error: {response.status_code}"}
+        
+        return response.json()
+    except requests.exceptions.ConnectionError:
+        return {
+            "error": "Could not connect to server. "
+            "Is it running?"
+        }
+    except Exception as e:
+        return {"error": f"Error: {str(e)}"}
+
+
+def print_summarization_result(result: Dict) -> bool:
+    """Print the summarization result in a user-friendly format."""
+    if "error" in result:
+        print(f"\n❌ Summarization failed: {result['error']}")
+        return False
+    
+    if not result.get("success"):
+        print("\n❌ Summarization failed: Unknown error")
+        return False
+    
+    print("\n✨ Conversation summarized successfully!")
+    print("\nSummary:")
+    print("-" * 40)
+    print(result["summary"])
+    print("-" * 40)
+    
+    reduction = result["token_reduction"]
+    saved = reduction["before"] - reduction["after"]
+    percent = (
+        (saved / reduction["before"]) * 100 
+        if reduction["before"] > 0 else 0
+    )
+    
+    print(f"\nToken reduction: {saved} ({percent:.1f}%)")
+    print(f"- Before: {reduction['before']}")
+    print(f"- After: {reduction['after']}")
+    
+    return True
+
+
+def chat_loop():
+    check_api_key()
+    conversation = Conversation()
+    
+    print("Chat session started. Commands:")
+    print("- 'exit': End the conversation")
+    print("- 'summarize': Summarize conversation to reduce length")
+    print("-" * 60)
+    
+    while True:
+        try:
+            user_input = input("\nYou: ").strip()
+            
+            if not user_input:
+                continue
+            
+            if user_input.lower() == 'exit':
+                break
+            
+            if user_input.lower() == 'summarize':
+                result = summarize_conversation(
+                    conversation.get_messages(),
+                    conversation.session_id
+                )
+                if print_summarization_result(result):
+                    conversation.set_messages(result["messages"])
+                    # Update session ID from summarization response
+                    if "session_id" in result:
+                        conversation.session_id = result["session_id"]
+                continue
+            
+            # Add user message to history
+            conversation.add_message("user", user_input)
+            
+            print("\nAssistant:", end=" ", flush=True)
+            full_response = ""
+            for chunk in stream_response(
+                conversation.get_messages(),
+                session_id=conversation.session_id
+            ):
+                full_response += chunk
+                print(chunk, end="", flush=True)
+            print()
+            
+            # Add assistant's response to history
+            if full_response:
+                conversation.add_message("assistant", full_response)
+            
+        except KeyboardInterrupt:
+            print("\nExiting chat...")
+            break
+        except EOFError:
+            print("\nExiting chat...")
+            break
+
+
+def main():
+    chat_loop()
+
+
+if __name__ == "__main__":
+    main() 

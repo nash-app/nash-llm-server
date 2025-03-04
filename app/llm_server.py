@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 from litellm import acompletion
 import uvicorn
 import json
@@ -13,6 +14,15 @@ load_dotenv()
 
 app = FastAPI(title="Nash LLM Server")
 
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, specify exact origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Or specify: ["GET", "POST"]
+    allow_headers=["*"],  # Or specify required headers
+)
+
 # Constants
 DEFAULT_MODEL = "gpt-3.5-turbo"
 SYSTEM_PROMPT = "You are a helpful AI assistant."
@@ -20,7 +30,7 @@ SYSTEM_PROMPT = "You are a helpful AI assistant."
 # Configure LiteLLM to use Helicone proxy
 HELICONE_API_KEY = os.getenv('HELICONE_API_KEY')
 if HELICONE_API_KEY:
-    print(f"Configuring Helicone proxy with API key: {HELICONE_API_KEY[:6]}...")
+    print(f"Configuring Helicone with API key: {HELICONE_API_KEY[:6]}...")
     litellm.api_base = "https://oai.helicone.ai/v1"
     litellm.headers = {
         "Helicone-Auth": f"Bearer {HELICONE_API_KEY}",

@@ -6,6 +6,7 @@ import json
 from dotenv import load_dotenv
 import os
 import litellm
+import uuid
 
 # Load environment variables from .env file
 load_dotenv()
@@ -21,7 +22,10 @@ HELICONE_API_KEY = os.getenv('HELICONE_API_KEY')
 if HELICONE_API_KEY:
     print(f"Configuring Helicone proxy with API key: {HELICONE_API_KEY[:6]}...")
     litellm.api_base = "https://oai.helicone.ai/v1"
-    litellm.headers = {"Helicone-Auth": f"Bearer {HELICONE_API_KEY}"}
+    litellm.headers = {
+        "Helicone-Auth": f"Bearer {HELICONE_API_KEY}",
+        "Helicone-Session-Id": str(uuid.uuid4())
+    }
 else:
     print("Warning: HELICONE_API_KEY not found in environment variables")
 

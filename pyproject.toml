@@ -18,6 +18,10 @@ litellm = "^1.30.3"
 uvicorn = "^0.27.1"
 python-dotenv = "^1.0.1"
 
+[tool.poetry.group.dev.dependencies]
+flake8 = "^7.0.0"
+black = "^24.0.0"
+
 [tool.poetry.scripts]
 llm_server = "app.llm_server:main"
 llm_client = "llm_client:main"

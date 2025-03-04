@@ -1,0 +1,35 @@
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "nash-llm-server"
+version = "0.0.1"
+description = "Nash LLM Server"
+authors = ["Nash Team <team@nash.run>"]
+readme = "README.md"
+packages = [{include = "app", from = "."}]
+
+[tool.poetry.dependencies]
+python = ">=3.11"
+requests = ">=2.32.3,<3.0.0"
+fastapi = "^0.110.0"
+litellm = "^1.30.3"
+uvicorn = "^0.27.1"
+python-dotenv = "^1.0.1"
+
+[tool.poetry.scripts]
+llm_server = "app.llm_server:main"
+llm_client = "llm_client:main"
+
+[tool.black]
+line-length = 120
+target-version = ["py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 120
+
+[tool.flake8]
+max-line-length = 120
+extend-ignore = "E203"

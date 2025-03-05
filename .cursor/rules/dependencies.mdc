@@ -1,4 +1,9 @@
-# Project Rules
+---
+description: Dependency management
+globs: *.py
+alwaysApply: false
+---
+ # Project Rules
 
 ## Dependency Management
 

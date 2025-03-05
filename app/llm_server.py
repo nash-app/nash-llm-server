@@ -95,8 +95,7 @@ async def summarize_conversation(messages: list, session_id: str = None) -> dict
             summarized_messages.append(system_msg)
         
         summarized_messages.extend([
-            {"role": "system", "content": "Previous conversation summary:\n" + summary},
-            {"role": "assistant", "content": "The conversation has been summarized."}
+            {"role": "assistant", "content": "Previous conversation summary:\n" + summary}
         ])
         
         return {

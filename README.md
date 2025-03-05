@@ -51,10 +51,70 @@ data: [DONE]
    ```
 
 2. `POST /v1/chat/summarize`
+
    ```json
    {
      "messages": [],
      "session_id": "optional"
+   }
+   ```
+
+3. `POST /v1/mcp/{method}`
+
+   Generic endpoint for calling any MCP client method. The method name is specified in the URL path, and any arguments are passed in the request body.
+
+   ```json
+   {
+     // Method arguments as key-value pairs
+     "arg1": "value1",
+     "arg2": "value2"
+   }
+   ```
+
+   Examples:
+
+   ```bash
+   # List available tools
+   POST /v1/mcp/list_tools
+   {}
+
+   # Get a tool's schema
+   POST /v1/mcp/get_tool_schema
+   {
+     "tool_name": "my_tool"
+   }
+
+   # Execute a tool
+   POST /v1/mcp/execute_tool
+   {
+     "tool_name": "my_tool",
+     "args": {
+       "param1": "value1"
+     }
+   }
+   ```
+
+   The response format is consistent:
+
+   ```json
+   {
+     "result": <method result>
+   }
+   ```
+
+   Error responses:
+
+   ```json
+   {
+     "error": "Error message"
+   }
+   ```
+
+   or for 400 errors:
+
+   ```json
+   {
+     "detail": "Error details"
    }
    ```
 

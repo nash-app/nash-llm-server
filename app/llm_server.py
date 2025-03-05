@@ -214,28 +214,6 @@ async def stream_completion(request: Request):
     )
 
 
-@app.post("/v1/mcp/execute")
-async def execute_mcp_tool(request: Request):
-    """Execute a tool on the MCP server."""
-    try:
-        data = await request.json()
-        tool_name = data.get("tool")
-        args = data.get("args", {})
-        
-        if not tool_name:
-            raise HTTPException(status_code=400, detail="Tool name is required")
-            
-        # Get MCP client instance
-        mcp_client = await MCPClientSingleton.get_instance()
-        
-        # Execute the tool
-        result = await mcp_client.execute_tool(tool_name, args)
-        return {"result": result}
-        
-    except Exception as e:
-        return {"error": f"Error executing MCP tool: {str(e)}"}
-
-
 @app.post("/v1/mcp/{method}")
 async def mcp_method(request: Request, method: str):
     """Generic endpoint for any MCP client method.
@@ -248,6 +226,8 @@ async def mcp_method(request: Request, method: str):
         POST /v1/mcp/list_tools
         POST /v1/mcp/get_tool_schema
             Body: {"tool_name": "my_tool"}
+        POST /v1/mcp/execute_tool
+            Body: {"tool_name": "my_tool", "args": {"param1": "value1"}}
     """
     try:
         # Get MCP client instance

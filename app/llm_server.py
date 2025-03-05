@@ -236,6 +236,45 @@ async def execute_mcp_tool(request: Request):
         return {"error": f"Error executing MCP tool: {str(e)}"}
 
 
+@app.post("/v1/mcp/{method}")
+async def mcp_method(request: Request, method: str):
+    """Generic endpoint for any MCP client method.
+    
+    Args:
+        method: The MCP client method to call (e.g., 'list_tools', 'get_tool_schema')
+        request: JSON body containing method arguments
+        
+    Example:
+        POST /v1/mcp/list_tools
+        POST /v1/mcp/get_tool_schema
+            Body: {"tool_name": "my_tool"}
+    """
+    try:
+        # Get MCP client instance
+        mcp_client = await MCPClientSingleton.get_instance()
+        
+        # Get method arguments from request body
+        args = await request.json() if await request.body() else {}
+        
+        # Check if method exists on client
+        if not hasattr(mcp_client, method):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Method '{method}' not found on MCP client"
+            )
+        
+        # Get the method and call it with args
+        client_method = getattr(mcp_client, method)
+        result = await client_method(**args)
+        
+        return {"result": result}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": f"Error calling MCP method '{method}': {str(e)}"}
+
+
 def main():
     if not os.getenv("OPENAI_API_KEY"):
         print("Error: OPENAI_API_KEY not found in environment variables.")

@@ -47,7 +47,13 @@ def stream_response(
     session_id: str = None
 ) -> Generator[str, None, None]:
     try:
-        print(f"\nClient Debug - Sending request with session_id: {session_id}")
+        print("\n=== Stream Response Start ===")
+        print(f"Input session_id: {session_id}")
+        print(f"Message count: {len(messages)}")
+        if messages:
+            print(f"First message role: {messages[0]['role']}")
+            print(f"Last message role: {messages[-1]['role']}")
+        
         payload = {
             "messages": messages,
             "session_id": session_id
@@ -55,6 +61,7 @@ def stream_response(
         if model:
             payload["model"] = model
             
+        print("\nSending request to server...")
         response = requests.post(
             "http://localhost:8001/v1/chat/completions/stream",
             json=payload,
@@ -74,23 +81,29 @@ def stream_response(
             print(error_msg)
             return
         
+        print("\nProcessing server response...")
         full_response = ""
         first_session_id = None
         last_session_id = None
+        chunk_count = 0
         
         for line in response.iter_lines():
             if line:
                 line = line.decode("utf-8")
                 if line.startswith("data: "):
+                    chunk_count += 1
                     data = line[6:]  # Remove "data: " prefix
                     if data == "[DONE]":
+                        print("\nReceived [DONE] marker")
                         break
                     try:
                         parsed = json.loads(data)
                         if "error" in parsed:
-                            print(f"\nError: {parsed['error']}")
+                            print("\nERROR")
+                            print(f"Error content: {parsed['error']}")
                             return
                         if "warning" in parsed:
+                            print("\nWARNING")
                             warning = parsed["warning"]
                             print(f"\n⚠️  {warning['warning']}")
                             print("\nSuggestions:")
@@ -120,23 +133,30 @@ def stream_response(
                             session_id = parsed["session_id"]
                             if first_session_id is None:
                                 first_session_id = session_id
-                                print(f"Client Debug - First session_id: {session_id}")
+                                print(f"\nGot first session_id: {session_id}")
+                                # Yield session ID tuple immediately
+                                yield "", first_session_id
                             last_session_id = session_id
                             continue
                             
-                        content = parsed.get("content")
-                        if content:
+                        if "content" in parsed:
+                            content = parsed["content"]
                             full_response += content
                             yield content
+                        else:
+                            print(f"\nUnknown chunk type: {parsed}")
                     except json.JSONDecodeError:
+                        print("\nParse error - Invalid JSON")
                         continue
         
-        # Verify session IDs match
+        print("\n=== Stream Response Summary ===")
+        print(f"Total chunks: {chunk_count}")
         if first_session_id != last_session_id:
-            print("Warning: Session ID mismatch between first and last chunks")
+            print("\n⚠️  WARNING: Session ID mismatch")
+            print(f"First: {first_session_id}")
+            print(f"Last: {last_session_id}")
             return None, None
             
-        print(f"Client Debug - Final session_id: {first_session_id}")
         return full_response, first_session_id
     except requests.exceptions.ConnectionError:
         print("\nError: Could not connect to the LLM server.")
@@ -208,14 +228,23 @@ def chat_loop():
     check_api_key()
     conversation = Conversation()
     first_message = True
+    message_count = 0
     
-    print("Chat session started. Commands:")
+    print("\n=== Chat Session Started ===")
+    print("Commands:")
     print("- 'exit': End the conversation")
     print("- 'summarize': Summarize conversation to reduce length")
     print("-" * 60)
     
     while True:
         try:
+            message_count += 1
+            print(f"\n=== Message {message_count} ===")
+            if conversation.session_id:
+                print(f"Session: {conversation.session_id[:8]}...")
+            else:
+                print("Session: None")
+            
             user_input = input("\nYou: ").strip()
             
             if not user_input:
@@ -225,49 +254,53 @@ def chat_loop():
                 break
             
             if user_input.lower() == 'summarize':
+                print("\n=== Summarizing Conversation ===")
                 result = summarize_conversation(
                     conversation.get_messages(),
                     conversation.session_id
                 )
                 if print_summarization_result(result):
                     conversation.set_messages(result["messages"])
-                    # Update session ID from summarization response
                     if "session_id" in result:
                         conversation.session_id = result["session_id"]
                 continue
             
             # Add user message to history
             conversation.add_message("user", user_input)
-            print(f"\nClient Debug - Current session_id: {conversation.session_id}")
-            
-            print("\nAssistant:", end=" ", flush=True)
-            full_response = ""
             
             # Only send session_id after first message
             current_session_id = None if first_message else conversation.session_id
             
+            print("\nAssistant:", end=" ", flush=True)
+            
             # Process the stream response
+            response_text = ""
             response_chunks = []
+            
+            # Collect all chunks from the stream
+            got_session_id = False
             for chunk in stream_response(
                 conversation.get_messages(),
                 session_id=current_session_id
             ):
                 if isinstance(chunk, tuple):
-                    # This is the final return value (full_response, session_id)
-                    full_response, session_id = chunk
-                    if session_id:
-                        conversation.session_id = session_id
+                    # This is the final response tuple
+                    response_text, new_session_id = chunk
+                    if new_session_id and not got_session_id:
+                        # Update session ID if we haven't already
+                        conversation.session_id = new_session_id
                         first_message = False
+                        got_session_id = True
                 else:
                     # This is a content chunk
-                    full_response += chunk
                     print(chunk, end="", flush=True)
                     response_chunks.append(chunk)
+                    response_text += chunk
             print()
             
-            # Add assistant's response to history
-            if full_response:
-                conversation.add_message("assistant", full_response)
+            # Add assistant's response to history if we got one
+            if response_text:
+                conversation.add_message("assistant", response_text)
             
         except KeyboardInterrupt:
             print("\nExiting chat...")

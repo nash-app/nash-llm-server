@@ -2,9 +2,8 @@ from typing import Optional
 import asyncio
 import os
 from pathlib import Path
-from mcp.client import ClientSession
-from mcp.transport.stdio import stdio_client
-from mcp.client.stdio import StdioServerParameters
+from mcp.client.session import ClientSession
+from mcp.client.stdio import stdio_client, StdioServerParameters
 
 
 class MCPClientSingleton:

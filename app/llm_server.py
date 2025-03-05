@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from litellm import acompletion
@@ -9,6 +9,7 @@ import os
 import litellm
 import uuid
 from .prompts import CHAT_SYSTEM_PROMPT, SUMMARIZE_SYSTEM_PROMPT
+from .mcp_client import MCPClientSingleton
 
 # Load environment variables from .env file
 load_dotenv()
@@ -213,6 +214,28 @@ async def stream_completion(request: Request):
     )
 
 
+@app.post("/v1/mcp/execute")
+async def execute_mcp_tool(request: Request):
+    """Execute a tool on the MCP server."""
+    try:
+        data = await request.json()
+        tool_name = data.get("tool")
+        args = data.get("args", {})
+        
+        if not tool_name:
+            raise HTTPException(status_code=400, detail="Tool name is required")
+            
+        # Get MCP client instance
+        mcp_client = await MCPClientSingleton.get_instance()
+        
+        # Execute the tool
+        result = await mcp_client.execute_tool(tool_name, args)
+        return {"result": result}
+        
+    except Exception as e:
+        return {"error": f"Error executing MCP tool: {str(e)}"}
+
+
 def main():
     if not os.getenv("OPENAI_API_KEY"):
         print("Error: OPENAI_API_KEY not found in environment variables.")
@@ -229,6 +252,11 @@ def main():
     print(f"Default Model: {DEFAULT_MODEL}")
     print(f"System Prompt: {CHAT_SYSTEM_PROMPT}")
     print(f"Helicone API Base: {litellm.api_base}")
+    
+    # Clean up MCP client on shutdown
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        await MCPClientSingleton.close()
     
     uvicorn.run(app, host="0.0.0.0", port=8001)
 

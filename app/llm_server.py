@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 import os
 import litellm
 import uuid
+import signal
+import sys
 from .prompts import CHAT_SYSTEM_PROMPT, SUMMARIZE_SYSTEM_PROMPT
 from .mcp_client import MCPClientSingleton
 
@@ -41,6 +43,15 @@ if HELICONE_API_KEY:
 else:
     print("Warning: HELICONE_API_KEY not found in environment variables")
 
+# Global server instance for graceful shutdown
+server = None
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully."""
+    print("\nReceived shutdown signal. Cleaning up...")
+    if server:
+        server.should_exit = True
+    sys.exit(0)
 
 def estimate_tokens(messages: list) -> int:
     """Rough estimation of tokens in messages. 1 token ≈ 4 chars in English."""
@@ -272,12 +283,42 @@ def main():
     print(f"System Prompt: {CHAT_SYSTEM_PROMPT}")
     print(f"Helicone API Base: {litellm.api_base}")
     
+    # Initialize MCP client on startup
+    @app.on_event("startup")
+    async def startup_event():
+        print("\nInitializing MCP client...")
+        try:
+            await MCPClientSingleton.get_instance()
+            print("MCP client initialized successfully")
+        except Exception as e:
+            print(f"Error initializing MCP client: {str(e)}")
+            raise
+    
     # Clean up MCP client on shutdown
     @app.on_event("shutdown")
     async def shutdown_event():
-        await MCPClientSingleton.close()
+        print("\nClosing MCP client...")
+        try:
+            await MCPClientSingleton.close()
+            print("MCP client closed successfully")
+        except Exception as e:
+            print(f"Error closing MCP client: {str(e)}")
     
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    # Register signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    # Start the server with graceful shutdown
+    global server
+    server = uvicorn.Server(
+        uvicorn.Config(
+            app,
+            host="0.0.0.0",
+            port=8001,
+            log_level="info"
+        )
+    )
+    server.run()
 
 
 if __name__ == "__main__":

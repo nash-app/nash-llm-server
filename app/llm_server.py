@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from litellm import acompletion
@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 import os
 import litellm
 import uuid
+from typing import List, Optional
+from pydantic import BaseModel, Field
 from .prompts import CHAT_SYSTEM_PROMPT, SUMMARIZE_SYSTEM_PROMPT
 
 # Load environment variables from .env file
@@ -25,25 +27,67 @@ app.add_middleware(
 )
 
 # Constants
-DEFAULT_MODEL = "gpt-4-turbo"
 MAX_MESSAGES = 20  # Maximum number of messages before suggesting summarization
 MAX_TOTAL_TOKENS = 50000  # Approximate token limit before warning
 
-# Configure LiteLLM to use Helicone proxy
+# Provider-specific base URLs
+OPENAI_BASE_URL = "https://api.openai.com/v1"
+ANTHROPIC_BASE_URL = "https://api.anthropic.com"
+HELICONE_OPENAI_BASE_URL = "https://oai.helicone.ai/v1"
+HELICONE_ANTHROPIC_BASE_URL = "https://anthropic.helicone.ai/"
+
+# Configure Helicone if key is provided
 HELICONE_API_KEY = os.getenv('HELICONE_API_KEY')
 if HELICONE_API_KEY:
     print(f"Configuring Helicone with API key: {HELICONE_API_KEY[:6]}...")
-    litellm.api_base = "https://oai.helicone.ai/v1"
     litellm.headers = {
         "Helicone-Auth": f"Bearer {HELICONE_API_KEY}",
     }
-else:
-    print("Warning: HELICONE_API_KEY not found in environment variables")
 
 
-def estimate_tokens(messages: list) -> int:
-    """Rough estimation of tokens in messages. 1 token ≈ 4 chars in English."""
-    return sum(len(str(msg.get("content", ""))) // 4 for msg in messages)
+class Message(BaseModel):
+    """A message in the conversation."""
+    role: str = Field(
+        ...,
+        description="The role of the message sender (user/assistant/system)"
+    )
+    content: str = Field(..., description="The content of the message")
+
+
+class BaseRequest(BaseModel):
+    """Base request model with common fields."""
+    messages: List[Message] = Field(
+        ...,
+        description="List of messages in the conversation"
+    )
+    session_id: Optional[str] = Field(
+        None,
+        description="Optional session ID for tracking"
+    )
+    api_key: str = Field(
+        ...,
+        description="API key to use for the request"
+    )
+    api_base_url: str = Field(
+        ...,
+        description="API base URL to use for the request"
+    )
+
+
+class StreamRequest(BaseRequest):
+    """Request model for streaming completions."""
+    model: str = Field(
+        ...,
+        description="Model to use for completion"
+    )
+
+
+class SummarizeRequest(BaseRequest):
+    """Request model for conversation summarization."""
+    model: str = Field(
+        ...,
+        description="Model to use for summarization"
+    )
 
 
 def get_helicone_headers(session_id: str = None) -> dict:
@@ -52,18 +96,40 @@ def get_helicone_headers(session_id: str = None) -> dict:
     if HELICONE_API_KEY:
         headers["Helicone-Auth"] = f"Bearer {HELICONE_API_KEY}"
         new_session = str(uuid.uuid4()) if not session_id else session_id
-        print(f"Server Debug - get_helicone_headers input session_id: {session_id}")
-        print(f"Server Debug - get_helicone_headers using session_id: {new_session}")
+        print(
+            "Server Debug - get_helicone_headers input session_id: "
+            f"{session_id}"
+        )
+        print(
+            "Server Debug - get_helicone_headers using session_id: "
+            f"{new_session}"
+        )
         headers["Helicone-Session-Id"] = new_session
         headers["Helicone-Session-Name"] = "DIRECT"
     return headers
 
 
-async def summarize_conversation(messages: list, session_id: str = None) -> dict:
-    """Summarize a conversation to reduce token count while preserving context."""
+def estimate_tokens(messages: list) -> int:
+    """Rough estimation of tokens in messages. 1 token ≈ 4 chars in English."""
+    return sum(len(str(msg.get("content", ""))) // 4 for msg in messages)
+
+
+async def summarize_conversation(
+    messages: list,
+    model: str,
+    api_key: str,
+    api_base_url: str,
+    session_id: str = None
+) -> dict:
+    """Summarize a conversation to reduce token count while preserving 
+    context."""
     try:
         if not messages:
             return {"error": "No messages to summarize"}
+        
+        # Set API configuration
+        litellm.api_base = api_base_url
+        litellm.api_key = api_key
         
         # Keep system message separate if it exists
         system_msg = None
@@ -74,15 +140,19 @@ async def summarize_conversation(messages: list, session_id: str = None) -> dict
         # Prepare messages for summarization
         summary_request = [
             {"role": "system", "content": SUMMARIZE_SYSTEM_PROMPT},
-            {"role": "user", "content": "Please summarize this conversation:\n\n" + 
-             "\n".join([f"{m['role']}: {m['content']}" for m in messages])}
+            {
+                "role": "user",
+                "content": "Please summarize this conversation:\n\n" + 
+                "\n".join([f"{m['role']}: {m['content']}" for m in messages])
+            }
         ]
         
         # Get headers with session ID
         headers = get_helicone_headers(session_id)
         litellm.headers = headers
+        
         response = await acompletion(
-            model=DEFAULT_MODEL,
+            model=model,
             messages=summary_request,
             stream=False
         )
@@ -95,7 +165,10 @@ async def summarize_conversation(messages: list, session_id: str = None) -> dict
             summarized_messages.append(system_msg)
         
         summarized_messages.extend([
-            {"role": "assistant", "content": "Previous conversation summary:\n" + summary}
+            {
+                "role": "assistant",
+                "content": "Previous conversation summary:\n" + summary
+            }
         ])
         
         return {
@@ -112,29 +185,44 @@ async def summarize_conversation(messages: list, session_id: str = None) -> dict
     except Exception as e:
         return {"error": f"Error during summarization: {str(e)}"}
 
+
 @app.post("/v1/chat/summarize")
-async def summarize_completion(request: Request):
+async def summarize_completion(request: SummarizeRequest):
     try:
-        data = await request.json()
-        messages = data.get("messages", [])
-        session_id = data.get("session_id")  # Get session_id from request if provided
-        
-        result = await summarize_conversation(messages, session_id)
+        result = await summarize_conversation(
+            [msg.dict() for msg in request.messages],
+            request.model,
+            request.api_key,
+            request.api_base_url,
+            request.session_id
+        )
         return result
     except Exception as e:
         return {"error": f"Error processing request: {str(e)}"}
 
 
-async def stream_llm_response(messages: list = None, model: str = None, session_id: str = None):
+async def stream_llm_response(
+    messages: list,
+    model: str,
+    api_key: str,
+    api_base_url: str,
+    session_id: str = None
+):
     try:
         if not messages:
             messages = []
         
-        print(f"\nServer Debug - stream_llm_response received session_id: {session_id}")
+        print(
+            "\nServer Debug - stream_llm_response received session_id: "
+            f"{session_id}"
+        )
         
         # Ensure system message is first if not already present
         if not messages or messages[0].get("role") != "system":
-            messages.insert(0, {"role": "system", "content": CHAT_SYSTEM_PROMPT})
+            messages.insert(
+                0,
+                {"role": "system", "content": CHAT_SYSTEM_PROMPT}
+            )
         
         # Check conversation length and token count
         num_messages = len(messages)
@@ -143,12 +231,20 @@ async def stream_llm_response(messages: list = None, model: str = None, session_
         # Get headers with session ID
         headers = get_helicone_headers(session_id)
         session_id = headers['Helicone-Session-Id']
-        print(f"Server Debug - stream_llm_response using session_id: {session_id}")
+        print(
+            "Server Debug - stream_llm_response using session_id: "
+            f"{session_id}"
+        )
+        
+        # Set API configuration
+        litellm.api_base = api_base_url
+        litellm.api_key = api_key
+        litellm.headers = headers
         
         print("\nMaking LLM request:")
         print(f"Session ID: {session_id}")
         print(f"API Base: {litellm.api_base}")
-        print(f"Model: {model or DEFAULT_MODEL}")
+        print(f"Model: {model}")
         print(f"Message Count: {num_messages}")
         print(f"Estimated tokens: {estimated_tokens}")
         print(f"Headers: {headers}")
@@ -165,7 +261,7 @@ async def stream_llm_response(messages: list = None, model: str = None, session_
                 "suggestions": [
                     "Summarize the conversation so far and start fresh",
                     "Keep only the most recent and relevant messages",
-                    "Clear the conversation while preserving the system message"
+                    "Clear the conversation while preserving system message"
                 ],
                 "details": {
                     "message_count": num_messages,
@@ -179,9 +275,8 @@ async def stream_llm_response(messages: list = None, model: str = None, session_
             yield f"data: {json.dumps({'warning': warning})}\n\n"
             return
         
-        litellm.headers = headers
         response = await acompletion(
-            model=model or DEFAULT_MODEL,
+            model=model,
             messages=messages,
             stream=True
         )
@@ -201,34 +296,26 @@ async def stream_llm_response(messages: list = None, model: str = None, session_
 
 
 @app.post("/v1/chat/completions/stream")
-async def stream_completion(request: Request):
-    data = await request.json()
-    messages = data.get("messages", [])
-    model = data.get("model")
-    session_id = data.get("session_id")  # Get session_id from request if provided
-    
+async def stream_completion(request: StreamRequest):
     return StreamingResponse(
-        stream_llm_response(messages, model, session_id),
+        stream_llm_response(
+            [msg.dict() for msg in request.messages],
+            request.model,
+            request.api_key,
+            request.api_base_url,
+            request.session_id
+        ),
         media_type="text/event-stream"
     )
 
 
 def main():
-    if not os.getenv("OPENAI_API_KEY"):
-        print("Error: OPENAI_API_KEY not found in environment variables.")
-        print("Please create a .env file based on .env.example")
-        return
-
     if not os.getenv("HELICONE_API_KEY"):
-        print("Error: HELICONE_API_KEY not found in environment variables.")
+        print("Warning: HELICONE_API_KEY not found in environment variables.")
         print("Please create a .env file based on .env.example")
-        return
     
     print("\nStarting LLM server with configuration:")
-    print(f"OpenAI API Key: {os.getenv('OPENAI_API_KEY')[:6]}...")
-    print(f"Default Model: {DEFAULT_MODEL}")
     print(f"System Prompt: {CHAT_SYSTEM_PROMPT}")
-    print(f"Helicone API Base: {litellm.api_base}")
     
     uvicorn.run(app, host="0.0.0.0", port=8001)
 

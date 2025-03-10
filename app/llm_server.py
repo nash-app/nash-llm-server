@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from litellm import acompletion
@@ -9,6 +9,8 @@ import os
 import litellm
 import uuid
 from .prompts import CHAT_SYSTEM_PROMPT, SUMMARIZE_SYSTEM_PROMPT
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
 # Load environment variables from .env file
 load_dotenv()
@@ -40,6 +42,44 @@ if HELICONE_API_KEY:
 else:
     print("Warning: HELICONE_API_KEY not found in environment variables")
 
+# MCP Server Parameters
+NASH_PATH = os.getenv('NASH_PATH')
+if not NASH_PATH:
+    raise RuntimeError(
+        "NASH_PATH environment variable not set. "
+        "Please set it to the nash-mcp repository root."
+    )
+
+server_params = StdioServerParameters(
+    command=os.path.join(NASH_PATH, ".venv/bin/mcp"),  # Executable
+    args=["run", os.path.join(NASH_PATH, "src/nash_mcp/server.py")],  # Server script
+    env=None  # Optional environment variables
+)
+
+# Global MCP client session
+mcp_session = None
+mcp_read = None
+mcp_write = None
+
+@app.on_event("startup")
+async def startup_event():
+    global mcp_session, mcp_read, mcp_write
+    print("\nInitializing MCP client...")
+    mcp_read, mcp_write = await stdio_client(server_params)
+    mcp_session = ClientSession(mcp_read, mcp_write)
+    await mcp_session.initialize()
+    print("MCP client initialized successfully")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    global mcp_session, mcp_read, mcp_write
+    if mcp_session:
+        await mcp_session.close()
+    if mcp_read:
+        await mcp_read.close()
+    if mcp_write:
+        await mcp_write.close()
+    print("MCP client closed")
 
 def estimate_tokens(messages: list) -> int:
     """Rough estimation of tokens in messages. 1 token ≈ 4 chars in English."""
@@ -211,6 +251,43 @@ async def stream_completion(request: Request):
         stream_llm_response(messages, model, session_id),
         media_type="text/event-stream"
     )
+
+
+@app.post("/v1/mcp/{method}")
+async def mcp_method(request: Request, method: str):
+    try:
+        if not mcp_session:
+            raise HTTPException(
+                status_code=500,
+                detail="MCP client not initialized"
+            )
+            
+        # Get method arguments from request body
+        args = await request.json() if await request.body() else {}
+        
+        if not hasattr(mcp_session, method):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Method '{method}' not found on MCP client"
+            )
+        
+        # Get the method and call it with args
+        client_method = getattr(mcp_session, method)
+        result = await client_method(**args)
+        
+        print(f"\nMCP Client {method} result:")
+        print(result)
+        
+        return {"result": result}
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"\nError in mcp_method: {str(e)}")
+        print(f"Error type: {type(e)}")
+        import traceback
+        print("Traceback:", traceback.format_exc())
+        return {"error": f"Error calling MCP method '{method}': {str(e)}"}
 
 
 def main():

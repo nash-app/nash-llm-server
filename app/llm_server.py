@@ -8,14 +8,21 @@ from dotenv import load_dotenv
 import os
 import litellm
 import uuid
+import signal
+import sys
 from .prompts import CHAT_SYSTEM_PROMPT, SUMMARIZE_SYSTEM_PROMPT
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+import asyncio
 
 # Load environment variables from .env file
 load_dotenv()
 
 app = FastAPI(title="Nash LLM Server")
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
 
 # Add CORS middleware
 app.add_middleware(
@@ -65,10 +72,11 @@ mcp_write = None
 async def startup_event():
     global mcp_session, mcp_read, mcp_write
     print("\nInitializing MCP client...")
-    mcp_read, mcp_write = await stdio_client(server_params)
-    mcp_session = ClientSession(mcp_read, mcp_write)
-    await mcp_session.initialize()
-    print("MCP client initialized successfully")
+    async with stdio_client(server_params) as (read, write):
+        mcp_read, mcp_write = read, write
+        mcp_session = ClientSession(mcp_read, mcp_write)
+        await mcp_session.initialize()
+        print("MCP client initialized successfully")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -290,6 +298,22 @@ async def mcp_method(request: Request, method: str):
         return {"error": f"Error calling MCP method '{method}': {str(e)}"}
 
 
+async def cleanup():
+    """Cleanup function to close MCP connections"""
+    global mcp_session, mcp_read, mcp_write
+    if mcp_session:
+        await mcp_session.close()
+    if mcp_read:
+        await mcp_read.close()
+    if mcp_write:
+        await mcp_write.close()
+    print("\nMCP client closed")
+
+def signal_handler(sig, frame):
+    print("\nShutting down gracefully...")
+    asyncio.run(cleanup())
+    sys.exit(0)
+
 def main():
     if not os.getenv("OPENAI_API_KEY"):
         print("Error: OPENAI_API_KEY not found in environment variables.")
@@ -307,7 +331,16 @@ def main():
     print(f"System Prompt: {CHAT_SYSTEM_PROMPT}")
     print(f"Helicone API Base: {litellm.api_base}")
     
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    # Setup signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    config = uvicorn.Config(app, host="0.0.0.0", port=8001)
+    global mcp_session, mcp_read, mcp_write
+    mcp_session, mcp_read, mcp_write = None, None, None
+    asyncio.run(startup_event())
+    server = uvicorn.Server(config)
+    server.run()
 
 
 if __name__ == "__main__":

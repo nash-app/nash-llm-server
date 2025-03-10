@@ -53,41 +53,105 @@ async def stream_completion(request: Request):
     )
 
 
-@app.post("/v1/mcp/{method}")
-async def mcp_method(request: Request, method: str):
-    """Generic endpoint for all MCP methods."""
+@app.post("/v1/mcp/list_tools")
+async def list_tools():
+    """List all available MCP tools."""
     try:
         mcp = MCPHandler.get_instance()
+        tools = await mcp.list_tools()
+        return {"tools": tools}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/v1/mcp/list_prompts")
+async def list_prompts():
+    """List all available prompts."""
+    try:
+        mcp = MCPHandler.get_instance()
+        prompts = await mcp.list_prompts()
+        return {"prompts": prompts}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/v1/mcp/get_prompt")
+async def get_prompt(request: Request):
+    """Get a specific prompt."""
+    try:
+        data = await request.json()
+        prompt_name = data.get("prompt_name")
+        arguments = data.get("arguments", {})
         
-        # Get method arguments from request body
-        args = await request.json() if await request.body() else {}
-        
-        if not hasattr(mcp, method):
+        if not prompt_name:
             raise HTTPException(
-                status_code=400,
-                detail=f"Method '{method}' not found on MCP handler"
+                status_code=400, 
+                detail="prompt_name is required"
             )
-        
-        # Get the method and call it with args
-        handler_method = getattr(mcp, method)
-        result = await handler_method(**args)
-        
-        print(f"\nMCP {method} result:")
-        print(result)
-        
-        return {"result": result}
             
+        mcp = MCPHandler.get_instance()
+        prompt = await mcp.get_prompt(prompt_name, arguments=arguments)
+        return {"prompt": prompt}
     except HTTPException:
         raise
     except Exception as e:
-        print(f"\nError in mcp_method: {str(e)}")
-        print(f"Error type: {type(e)}")
-        import traceback
-        print("Traceback:", traceback.format_exc())
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error calling MCP method '{method}': {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/v1/mcp/list_resources")
+async def list_resources():
+    """List all available resources."""
+    try:
+        mcp = MCPHandler.get_instance()
+        resources = await mcp.list_resources()
+        return {"resources": resources}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/v1/mcp/read_resource")
+async def read_resource(request: Request):
+    """Read a specific resource."""
+    try:
+        data = await request.json()
+        resource_path = data.get("resource_path")
+        
+        if not resource_path:
+            raise HTTPException(
+                status_code=400, 
+                detail="resource_path is required"
+            )
+            
+        mcp = MCPHandler.get_instance()
+        content = await mcp.read_resource(resource_path)
+        return {"content": content}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/v1/mcp/call_tool")
+async def call_tool(request: Request):
+    """Call a specific MCP tool."""
+    try:
+        data = await request.json()
+        tool_name = data.get("tool_name")
+        arguments = data.get("arguments", {})
+        
+        if not tool_name:
+            raise HTTPException(
+                status_code=400, 
+                detail="tool_name is required"
+            )
+            
+        mcp = MCPHandler.get_instance()
+        result = await mcp.call_tool(tool_name, arguments=arguments)
+        return {"result": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def main():

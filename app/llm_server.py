@@ -9,7 +9,8 @@ import os
 import litellm
 import uuid
 from .prompts import CHAT_SYSTEM_PROMPT, SUMMARIZE_SYSTEM_PROMPT
-from .mcp_client import MCPClientSingleton
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
 # Load environment variables from .env file
 load_dotenv()
@@ -41,6 +42,44 @@ if HELICONE_API_KEY:
 else:
     print("Warning: HELICONE_API_KEY not found in environment variables")
 
+# MCP Server Parameters
+NASH_PATH = os.getenv('NASH_PATH')
+if not NASH_PATH:
+    raise RuntimeError(
+        "NASH_PATH environment variable not set. "
+        "Please set it to the nash-mcp repository root."
+    )
+
+server_params = StdioServerParameters(
+    command=os.path.join(NASH_PATH, ".venv/bin/mcp"),  # Executable
+    args=["run", os.path.join(NASH_PATH, "src/nash_mcp/server.py")],  # Server script
+    env=None  # Optional environment variables
+)
+
+# Global MCP client session
+mcp_session = None
+mcp_read = None
+mcp_write = None
+
+@app.on_event("startup")
+async def startup_event():
+    global mcp_session, mcp_read, mcp_write
+    print("\nInitializing MCP client...")
+    mcp_read, mcp_write = await stdio_client(server_params)
+    mcp_session = ClientSession(mcp_read, mcp_write)
+    await mcp_session.initialize()
+    print("MCP client initialized successfully")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    global mcp_session, mcp_read, mcp_write
+    if mcp_session:
+        await mcp_session.close()
+    if mcp_read:
+        await mcp_read.close()
+    if mcp_write:
+        await mcp_write.close()
+    print("MCP client closed")
 
 def estimate_tokens(messages: list) -> int:
     """Rough estimation of tokens in messages. 1 token ≈ 4 chars in English."""
@@ -216,42 +255,38 @@ async def stream_completion(request: Request):
 
 @app.post("/v1/mcp/{method}")
 async def mcp_method(request: Request, method: str):
-    """Generic endpoint for any MCP client method.
-    
-    Args:
-        method: The MCP client method to call (e.g., 'list_tools', 'get_tool_schema')
-        request: JSON body containing method arguments
-        
-    Example:
-        POST /v1/mcp/list_tools
-        POST /v1/mcp/get_tool_schema
-            Body: {"tool_name": "my_tool"}
-        POST /v1/mcp/execute_tool
-            Body: {"tool_name": "my_tool", "args": {"param1": "value1"}}
-    """
     try:
-        # Get MCP client instance
-        mcp_client = await MCPClientSingleton.get_instance()
-        
+        if not mcp_session:
+            raise HTTPException(
+                status_code=500,
+                detail="MCP client not initialized"
+            )
+            
         # Get method arguments from request body
         args = await request.json() if await request.body() else {}
         
-        # Check if method exists on client
-        if not hasattr(mcp_client, method):
+        if not hasattr(mcp_session, method):
             raise HTTPException(
                 status_code=400,
                 detail=f"Method '{method}' not found on MCP client"
             )
         
         # Get the method and call it with args
-        client_method = getattr(mcp_client, method)
+        client_method = getattr(mcp_session, method)
         result = await client_method(**args)
         
-        return {"result": result}
+        print(f"\nMCP Client {method} result:")
+        print(result)
         
+        return {"result": result}
+            
     except HTTPException:
         raise
     except Exception as e:
+        print(f"\nError in mcp_method: {str(e)}")
+        print(f"Error type: {type(e)}")
+        import traceback
+        print("Traceback:", traceback.format_exc())
         return {"error": f"Error calling MCP method '{method}': {str(e)}"}
 
 
@@ -271,11 +306,6 @@ def main():
     print(f"Default Model: {DEFAULT_MODEL}")
     print(f"System Prompt: {CHAT_SYSTEM_PROMPT}")
     print(f"Helicone API Base: {litellm.api_base}")
-    
-    # Clean up MCP client on shutdown
-    @app.on_event("shutdown")
-    async def shutdown_event():
-        await MCPClientSingleton.close()
     
     uvicorn.run(app, host="0.0.0.0", port=8001)
 

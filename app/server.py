@@ -17,29 +17,23 @@ app.add_middleware(
     allow_headers=["*"],  # Or specify required headers
 )
 
-# Global MCP handler
-mcp = None
-
 
 @app.on_event("startup")
 async def startup_event():
     """Configure services on server startup."""
-    global mcp
-    
     # Configure LLM
     configure_llm()
     
-    # Initialize MCP
-    mcp = MCPHandler()
+    # Initialize MCP singleton
+    mcp = MCPHandler.get_instance()
     await mcp.initialize()
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on server shutdown."""
-    global mcp
-    if mcp:
-        await mcp.close()
+    mcp = MCPHandler.get_instance()
+    await mcp.close()
 
 
 @app.get("/health")
@@ -61,25 +55,35 @@ async def stream_completion(request: Request):
 
 @app.post("/v1/mcp/{method}")
 async def mcp_method(request: Request, method: str):
-    """Execute an MCP method."""
-    global mcp
-    
+    """Generic endpoint for all MCP methods."""
     try:
-        if not mcp:
-            raise HTTPException(
-                status_code=500,
-                detail="MCP client not initialized"
-            )
-            
+        mcp = MCPHandler.get_instance()
+        
         # Get method arguments from request body
         args = await request.json() if await request.body() else {}
         
-        result = await mcp.execute_method(method, **args)
+        if not hasattr(mcp, method):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Method '{method}' not found on MCP handler"
+            )
+        
+        # Get the method and call it with args
+        handler_method = getattr(mcp, method)
+        result = await handler_method(**args)
+        
+        print(f"\nMCP {method} result:")
+        print(result)
+        
         return {"result": result}
             
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"\nError in mcp_method: {str(e)}")
+        print(f"Error type: {type(e)}")
+        import traceback
+        print("Traceback:", traceback.format_exc())
         raise HTTPException(
             status_code=500,
             detail=f"Error calling MCP method '{method}': {str(e)}"

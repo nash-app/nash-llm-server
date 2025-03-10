@@ -24,7 +24,7 @@ flake8 = "^7.0.0"
 black = "^24.0.0"
 
 [tool.poetry.scripts]
-llm_server = "app.llm_server:main"
+llm_server = "app.server:main"
 client_example = "client_example:main"
 
 [tool.black]

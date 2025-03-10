@@ -1,85 +1,104 @@
-import os
 import asyncio
+import os
+from typing import Optional
+
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 
 class MCPHandler:
-    def __init__(self):
-        self.session = None
-        self.client = None
-        self._initialized = asyncio.Event()
-        
-        # Get MCP path from environment
-        self.nash_path = os.getenv('NASH_PATH')
-        if not self.nash_path:
-            raise ValueError(
-                "NASH_PATH environment variable not set. "
-                "Please set it to the nash-mcp repository root."
-            )
-            
-        self.server_params = StdioServerParameters(
-            command=os.path.join(self.nash_path, ".venv/bin/mcp"),
-            args=["run", os.path.join(
-                self.nash_path, "src/nash_mcp/server.py"
-            )],
-            env=None
-        )
+    _instance: Optional['MCPHandler'] = None
+    _initialized = False
+    _session: Optional[ClientSession] = None
+    _client_ctx = None
+    _session_ctx = None
+    _read = None
+    _write = None
+    _initialization_lock = asyncio.Lock()
     
-    async def _maintain_session(self, read, write):
-        """Initialize MCP session."""
-        self.session = ClientSession(read, write)
-        await self.session.initialize()
-        self._initialized.set()
-        # No need for while loop - just keep session alive
-        try:
-            await asyncio.Future()  # Keep session alive until cancelled
-        finally:
-            self._initialized.clear()
-            self.session = None
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    @classmethod
+    def get_instance(cls) -> 'MCPHandler':
+        if cls._instance is None:
+            cls._instance = MCPHandler()
+        return cls._instance
     
     async def initialize(self):
-        """Initialize MCP client session."""
-        self.client = stdio_client(self.server_params)
-        async with self.client as (read, write):
-            self.session = ClientSession(read, write)
-            await self.session.initialize()
-            self._initialized.set()
-            # Keep the context manager alive
-            while True:
-                await asyncio.sleep(1)
+        # Use a lock to prevent multiple simultaneous initializations
+        async with self._initialization_lock:
+            if self._initialized:
+                return
+            
+            # Setup server parameters
+            nash_path = os.getenv('NASH_PATH')
+            if not nash_path:
+                raise ValueError("NASH_PATH environment variable not set")
+                
+            mcp_cmd = os.path.join(nash_path, ".venv/bin/mcp")
+            server_script = os.path.join(nash_path, "src/nash_mcp/server.py")
+            server_params = StdioServerParameters(
+                command=mcp_cmd,
+                args=["run", server_script],
+                env=None
+            )
+            
+            try:
+                # Create and enter client context
+                self._client_ctx = stdio_client(server_params)
+                self._read, self._write = await self._client_ctx.__aenter__()
+                
+                # Create and enter session context
+                self._session = ClientSession(self._read, self._write)
+                await self._session.__aenter__()
+                await self._session.initialize()
+                
+                self._initialized = True
+            except Exception as e:
+                # Clean up if initialization fails
+                await self.close()
+                msg = f"Failed to initialize MCP: {str(e)}"
+                raise RuntimeError(msg) from e
     
     async def close(self):
-        """Close MCP client session and cleanup."""
-        if self.session:
-            self.session = None
-        if self.client:
-            self.client = None
-        self._initialized.clear()
+        """Gracefully close the MCP session and client"""
+        if self._session:
+            try:
+                await self._session.__aexit__(None, None, None)
+            except Exception:
+                pass
+            self._session = None
+            
+        if self._client_ctx:
+            try:
+                await self._client_ctx.__aexit__(None, None, None)
+            except Exception:
+                pass
+            self._client_ctx = None
+            
+        self._read = None
+        self._write = None
+        self._initialized = False
     
-    async def execute_method(self, method: str, **args):
-        """Execute an MCP method with arguments.
-        
-        Args:
-            method: Name of MCP method to call
-            **args: Arguments to pass to the method
-            
-        Returns:
-            Result from MCP method call
-        
-        Raises:
-            ValueError: If session not initialized or method doesn't exist
-            TimeoutError: If initialization times out
-        """
-        # Wait for initialization
-        if not await self._initialized.wait():
-            raise TimeoutError("MCP session initialization timed out")
-            
-        if not self.session:
-            raise ValueError("MCP session not initialized")
-            
-        if not hasattr(self.session, method):
-            raise ValueError(f"Method '{method}' not found on MCP client")
-            
-        client_method = getattr(self.session, method)
-        return await client_method(**args) 
+    async def ensure_initialized(self):
+        """Ensure the handler is initialized before use"""
+        if not self._initialized:
+            await self.initialize()
+    
+    async def list_tools(self):
+        """List available MCP tools"""
+        await self.ensure_initialized()
+        return await self._session.list_tools()
+    
+    async def call_tool(self, tool_name: str, **kwargs):
+        """Call an MCP tool with the given arguments"""
+        await self.ensure_initialized()
+        return await self._session.call_tool(tool_name, **kwargs)
+    
+    @property
+    def is_initialized(self) -> bool:
+        """Check if the handler is initialized"""
+        return self._initialized

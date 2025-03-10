@@ -5,34 +5,41 @@ from app.mcp_handler import MCPHandler
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-# Need to load environment variables before MCPHandler is instantiated
-if not os.getenv('NASH_PATH'):
-    load_dotenv()
+# Load environment variables before MCPHandler is instantiated
+load_dotenv()
 
 
 async def test_mcp():
-    mcp = MCPHandler()
+    # Get singleton instance
+    mcp = MCPHandler.get_instance()
     
     try:
-        # Start initialization in background
-        init_task = asyncio.create_task(mcp.initialize())
+        print("Initializing MCP handler...")
+        await mcp.initialize()
         
-        # Give it a moment to initialize
-        await asyncio.sleep(1)
+        print("\nListing available tools...")
+        tools = await mcp.list_tools()
+        print("Available tools:", tools)
         
-        print("\nListing available MCP tools...")
-        result = await mcp.execute_method("list_tools")
-        print("Available tools:", result)
-        
+        # Interactive tool testing loop
+        while True:
+            print("\nEnter a tool name to test (or 'quit' to exit):", end=" ")
+            tool_name = input().strip()
+            
+            if tool_name.lower() in ['quit', 'exit', 'bye']:
+                break
+                
+            try:
+                print(f"\nTesting tool: {tool_name}")
+                result = await mcp.call_tool(tool_name)
+                print(f"Result: {result}")
+            except Exception as e:
+                print(f"Error calling tool: {e}")
+                
     except Exception as e:
         print(f"Error during MCP testing: {e}")
     finally:
-        if 'init_task' in locals():
-            init_task.cancel()
-            try:
-                await init_task
-            except asyncio.CancelledError:
-                pass
+        print("\nClosing MCP handler...")
         await mcp.close()
 
 
@@ -65,17 +72,12 @@ async def test_basic_mcp():
 
 
 def main():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
     try:
-        loop.run_until_complete(test_mcp())
+        asyncio.run(test_mcp())
     except KeyboardInterrupt:
         print("\nStopped by user")
     except Exception as e:
         print(f"\nUnexpected error: {e}")
-    finally:
-        loop.close()
 
 
 if __name__ == "__main__":

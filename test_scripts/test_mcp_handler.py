@@ -9,6 +9,27 @@ from mcp.client.stdio import stdio_client
 load_dotenv()
 
 
+def format_tool_result(result):
+    """Format MCP tool result for display"""
+    if hasattr(result, 'content'):
+        # Handle structured responses
+        for content in result.content:
+            if content.type == 'text':
+                return content.text
+    # Fallback to string representation
+    return str(result)
+
+
+def format_tool_description(tool):
+    """Format a tool's description for display"""
+    # Get first line of description for summary
+    desc = tool.description.strip().split('\n')[0]
+    # Truncate if too long
+    if len(desc) > 100:
+        desc = desc[:97] + "..."
+    return f"{tool.name}: {desc}"
+
+
 async def test_mcp():
     # Get singleton instance
     mcp = MCPHandler.get_instance()
@@ -17,9 +38,12 @@ async def test_mcp():
         print("Initializing MCP handler...")
         await mcp.initialize()
         
-        print("\nListing available tools...")
+        print("\nAvailable MCP Tools:")
+        print("-" * 80)
         tools = await mcp.list_tools()
-        print("Available tools:", tools)
+        for tool in tools.tools:
+            print(format_tool_description(tool))
+        print("-" * 80)
         
         # Interactive tool testing loop
         while True:
@@ -31,8 +55,11 @@ async def test_mcp():
                 
             try:
                 print(f"\nTesting tool: {tool_name}")
+                print("-" * 80)
                 result = await mcp.call_tool(tool_name)
-                print(f"Result: {result}")
+                formatted_result = format_tool_result(result)
+                print(formatted_result)
+                print("-" * 80)
             except Exception as e:
                 print(f"Error calling tool: {e}")
                 

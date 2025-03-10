@@ -64,11 +64,23 @@ mcp_write = None
 @app.on_event("startup")
 async def startup_event():
     global mcp_session, mcp_read, mcp_write
-    print("\nInitializing MCP client...")
-    mcp_read, mcp_write = await stdio_client(server_params)
-    mcp_session = ClientSession(mcp_read, mcp_write)
-    await mcp_session.initialize()
-    print("MCP client initialized successfully")
+    try:
+        print("\nInitializing MCP client...")
+        print("Creating stdio client...")
+        async with stdio_client(server_params) as (read, write):
+            print("Stdio client created successfully")
+            mcp_read, mcp_write = read, write
+            print("Creating MCP session...")
+            mcp_session = ClientSession(mcp_read, mcp_write)
+            print("Initializing MCP session...")
+            await mcp_session.initialize()
+            print("MCP client initialized successfully")
+    except Exception as e:
+        print(f"Error during MCP client initialization: {str(e)}")
+        print(f"Error type: {type(e)}")
+        import traceback
+        print("Traceback:", traceback.format_exc())
+        raise
 
 @app.on_event("shutdown")
 async def shutdown_event():

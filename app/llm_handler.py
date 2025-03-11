@@ -37,7 +37,8 @@ async def stream_llm_response(messages: list = None, model: str = None):
         response = await acompletion(
             model=model or DEFAULT_MODEL,
             messages=messages,
-            stream=True
+            stream=True,
+            temperature=0.7
         )
 
         async for chunk in response:

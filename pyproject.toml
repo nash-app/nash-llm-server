@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "nash-llm-server"
-version = "0.0.1"
+version = "0.1.0"
 description = "Nash LLM Server"
 authors = ["Nash Team <team@nash.run>"]
 readme = "README.md"

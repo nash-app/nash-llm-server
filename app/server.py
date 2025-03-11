@@ -3,13 +3,19 @@ from pydantic import BaseModel, Field
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+import json
 
 from .llm_handler import stream_llm_response, summarize_conversation
 from .mcp_handler import MCPHandler
 from .prompts import get_system_prompt
 
 
+# Server configuration
 SYSTEM_PROMPT = ""
+
+# Conversation limits
+MAX_MESSAGES = 20  # Maximum number of messages before suggesting summarization
+MAX_TOTAL_TOKENS = 50000  # Approximate token limit before warning
 
 app = FastAPI(title="Nash LLM Server")
 
@@ -100,6 +106,36 @@ async def stream_completion(request: StreamRequest):
     """Stream chat completions with user-provided credentials."""
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     messages.extend([msg.dict() for msg in request.messages])
+    
+    # Check conversation limits
+    num_messages = len(messages)
+    estimated_tokens = sum(
+        len(str(msg.get("content", ""))) // 4 for msg in messages
+    )
+    
+    if num_messages > MAX_MESSAGES or estimated_tokens > MAX_TOTAL_TOKENS:
+        warning = {
+            "warning": {
+                "warning": "Conversation length exceeds recommended limits",
+                "suggestions": [
+                    "Summarize the conversation so far and start fresh",
+                    "Keep only the most recent and relevant messages",
+                    "Clear the conversation while preserving system message"
+                ],
+                "details": {
+                    "message_count": num_messages,
+                    "estimated_tokens": estimated_tokens,
+                    "limits": {
+                        "max_messages": MAX_MESSAGES,
+                        "max_tokens": MAX_TOTAL_TOKENS
+                    }
+                }
+            }
+        }
+        return StreamingResponse(
+            iter([f"data: {json.dumps(warning)}\n\n"]),
+            media_type="text/event-stream"
+        )
     
     return StreamingResponse(
         stream_llm_response(

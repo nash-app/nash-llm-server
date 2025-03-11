@@ -7,11 +7,6 @@ from dotenv import load_dotenv
 from .prompts import SUMMARIZE_SYSTEM_PROMPT
 
 
-DEFAULT_MODEL = "gpt-4-turbo"
-MAX_MESSAGES = 20  # Maximum number of messages before suggesting summarization
-MAX_TOTAL_TOKENS = 50000  # Approximate token limit before warning
-
-
 def get_helicone_headers(session_id: str = None) -> dict:
     """Get Helicone headers, creating a new session ID if none provided."""
     headers = {}
@@ -22,11 +17,6 @@ def get_helicone_headers(session_id: str = None) -> dict:
         headers["Helicone-Session-Id"] = new_session
         headers["Helicone-Session-Name"] = "DIRECT"
     return headers
-
-
-def estimate_tokens(messages: list) -> int:
-    """Rough estimation of tokens in messages. 1 token ≈ 4 chars in English."""
-    return sum(len(str(msg.get("content", ""))) // 4 for msg in messages)
 
 
 def configure_llm(api_key: str = None, api_base_url: str = None):
@@ -80,32 +70,8 @@ async def stream_llm_response(
         # Send session ID in first chunk
         yield f"data: {json.dumps({'session_id': session_id})}\n\n"
 
-        # Check conversation length and token count
-        num_messages = len(messages)
-        estimated_tokens = estimate_tokens(messages)
-
-        if num_messages > MAX_MESSAGES or estimated_tokens > MAX_TOTAL_TOKENS:
-            warning = {
-                "warning": "Conversation length exceeds recommended limits",
-                "suggestions": [
-                    "Summarize the conversation so far and start fresh",
-                    "Keep only the most recent and relevant messages",
-                    "Clear the conversation while preserving system message"
-                ],
-                "details": {
-                    "message_count": num_messages,
-                    "estimated_tokens": estimated_tokens,
-                    "limits": {
-                        "max_messages": MAX_MESSAGES,
-                        "max_tokens": MAX_TOTAL_TOKENS
-                    }
-                }
-            }
-            yield f"data: {json.dumps({'warning': warning})}\n\n"
-            return
-
         response = await acompletion(
-            model=model or DEFAULT_MODEL,
+            model=model,
             messages=messages,
             stream=True,
             temperature=0.7
@@ -154,8 +120,11 @@ async def summarize_conversation(
             {
                 "role": "user",
                 "content": (
-                    "Please summarize this conversation:\n\n" + 
-                    "\n".join([f"{m['role']}: {m['content']}" for m in messages])
+                    "Please summarize this conversation:\n\n"
+                    + "\n".join([
+                        f"{m['role']}: {m['content']}"
+                        for m in messages
+                    ])
                 )
             }
         ]
@@ -184,13 +153,22 @@ async def summarize_conversation(
             }
         ])
         
+        # Estimate tokens for before/after comparison
+        tokens_before = sum(
+            len(str(msg.get("content", ""))) // 4 for msg in messages
+        )
+        tokens_after = sum(
+            len(str(msg.get("content", ""))) // 4 
+            for msg in summarized_messages
+        )
+        
         return {
             "success": True,
             "summary": summary,
             "messages": summarized_messages,
             "token_reduction": {
-                "before": estimate_tokens(messages),
-                "after": estimate_tokens(summarized_messages)
+                "before": tokens_before,
+                "after": tokens_after
             },
             "session_id": headers['Helicone-Session-Id']
         }

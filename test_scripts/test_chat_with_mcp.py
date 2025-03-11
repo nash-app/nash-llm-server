@@ -2,19 +2,8 @@ import asyncio
 import json
 from app.llm_handler import configure_llm, stream_llm_response
 from app.mcp_handler import MCPHandler
-from app.prompt_generator import generate_tool_system_prompt
-
-
-def convert_tools_to_dict(tools_result):
-    """Convert MCP tools result to JSON-serializable format."""
-    tools = []
-    for tool in tools_result.tools:
-        tools.append({
-            "name": tool.name,
-            "description": tool.description,
-            "parameters": tool.inputSchema
-        })
-    return {"tools": tools}
+from app.prompts.system_prompt_generator import generate_tool_system_prompt
+from app.prompts.helpers import convert_tools_to_dict
 
 
 async def chat():

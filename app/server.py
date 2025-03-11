@@ -1,10 +1,16 @@
+import json
+
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from .llm_handler import stream_llm_response, configure_llm
 from .mcp_handler import MCPHandler
+from .prompts.system_prompt_generator import generate_tool_system_prompt
+from .prompts.helpers import convert_tools_to_dict
 
+
+SYSTEM_PROMPT = ""
 
 app = FastAPI(title="Nash LLM Server")
 
@@ -28,6 +34,18 @@ async def startup_event():
     mcp = MCPHandler.get_instance()
     await mcp.initialize()
 
+    # Get available tools
+    tools = await mcp.list_tools()
+
+    # Convert tools to JSON-serializable format
+    tools_dict = convert_tools_to_dict(tools)
+
+    global SYSTEM_PROMPT
+    # Generate system prompt with tool definitions
+    SYSTEM_PROMPT = generate_tool_system_prompt(
+        tool_definitions=json.dumps(tools_dict, indent=2)
+    )
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -43,8 +61,11 @@ async def health_check():
 
 @app.post("/v1/chat/completions/stream")
 async def stream_completion(request: Request):
+    global SYSTEM_PROMPT
+
     data = await request.json()
     messages = data.get("messages", [])
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
     model = data.get("model")
     
     return StreamingResponse(

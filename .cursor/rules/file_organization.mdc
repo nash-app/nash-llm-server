@@ -16,8 +16,8 @@ alwaysApply: false
 
 ### File Locations
 
-- Client: `llm_client.py` in the root directory
-- Server: `app/llm_server.py` in the app directory
+- Client: `client_example.py` in the root directory
+- Server: `app/server.py` in the app directory
 - Tests: `tests/` directory
 - Configuration: `.env` for environment variables, `pyproject.toml` for dependencies
 

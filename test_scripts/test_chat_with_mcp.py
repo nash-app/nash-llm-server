@@ -1,0 +1,132 @@
+import asyncio
+import json
+from app.llm_handler import configure_llm, stream_llm_response
+from app.mcp_handler import MCPHandler
+from app.prompts import get_system_prompt
+
+
+async def chat():
+    configure_llm()
+    messages = []
+    
+    # Initialize MCP and get tool definitions
+    mcp = MCPHandler.get_instance()
+    await mcp.initialize()
+    tools = await mcp.list_tools()
+
+    system_prompt = get_system_prompt(tools)
+
+    messages.append({
+        "role": "system",
+        "content": system_prompt
+    })
+    
+    try:
+        while True:
+            # Get user input
+            user_input = input("\nYou: ").strip()
+            if user_input.lower() in ['quit', 'exit', 'bye']:
+                break
+                
+            # Add user message to history
+            messages.append({
+                "role": "user",
+                "content": user_input
+            })
+            
+            # Stream AI response
+            print("\nAssistant: ", end="", flush=True)
+            assistant_message = ""
+            
+            async for chunk in stream_llm_response(messages):
+                if "error" in chunk:
+                    print("\nError:", chunk)
+                    break
+                    
+                if "[DONE]" not in chunk:
+                    try:
+                        parsed = json.loads(chunk.replace("data: ", ""))
+                        content = parsed.get("content", "")
+                        print(content, end="", flush=True)
+                        assistant_message += content
+                    except json.JSONDecodeError as e:
+                        print(f"\nFailed to parse chunk: {chunk}")
+                        print(f"Error: {e}")
+            
+            # Add assistant response to history and check for function calls
+            if assistant_message:
+                # Check for function call tag
+                if "<function_call>" in assistant_message:
+                    start_tag = "<function_call>"
+                    end_tag = "</function_call>"
+                    start_idx = assistant_message.find(start_tag) + len(start_tag)
+                    end_idx = assistant_message.find(end_tag)
+                    
+                    if start_idx > -1 and end_idx > -1:
+                        json_str = assistant_message[start_idx:end_idx].strip()
+                        try:
+                            function_calls = json.loads(json_str)
+                            
+                            # Execute each function call
+                            for call in function_calls:
+                                function = call.get("function", {})
+                                tool_name = function.get("name")
+                                arguments = function.get("arguments", {})
+                                
+                                if tool_name:
+                                    tool_result = await mcp.call_tool(
+                                        tool_name,
+                                        arguments=arguments
+                                    )
+                                    print(f"\n{tool_result}")
+                                    
+                                    # Add tool result to message history
+                                    messages.append({
+                                        "role": "function",
+                                        "name": tool_name,
+                                        "content": str(tool_result)
+                                    })
+                                    
+                                    # Get LLM's response to the tool result
+                                    async for chunk in stream_llm_response(messages):
+                                        if "error" in chunk:
+                                            print("\nError:", chunk)
+                                            break
+                                            
+                                        if "[DONE]" not in chunk:
+                                            try:
+                                                parsed = json.loads(chunk.replace("data: ", ""))
+                                                content = parsed.get("content", "")
+                                                print(content, end="", flush=True)
+                                                assistant_message += content
+                                            except json.JSONDecodeError as e:
+                                                print(f"\nError parsing chunk: {e}")
+                                
+                        except json.JSONDecodeError as e:
+                            print(f"\nError parsing function data: {e}")
+                        except Exception as e:
+                            print(f"\nError executing function: {e}")
+                        
+                messages.append({
+                    "role": "assistant", 
+                    "content": assistant_message
+                })
+            
+    except Exception as e:
+        print(f"\nError during chat: {e}")
+    finally:
+        # Clean up MCP
+        await mcp.close()
+    
+    print("\nChat ended.")
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(chat())
+    except KeyboardInterrupt:
+        print("\nStopped by user")
+        asyncio.run(MCPHandler.get_instance().close())
+    except Exception as e:
+        print(f"\nUnexpected error: {e}")
+        asyncio.run(MCPHandler.get_instance().close())

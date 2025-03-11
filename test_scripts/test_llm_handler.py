@@ -8,6 +8,29 @@ from app.llm_handler import (
 )
 
 
+def print_setup_instructions():
+    """Print instructions for setting up API keys and configuration."""
+    print("\n=== Nash LLM Test Script ===")
+    print("\nThis script uses environment variables for API configuration.")
+    print("To set up, copy .env.example to .env and configure your keys:")
+    print("\n```bash")
+    print("cp .env.example .env")
+    print("```\n")
+    print("Then edit .env with your configuration:")
+    print("```")
+    print("# OpenAI")
+    print("OPENAI_API_KEY=sk-...        # Required for OpenAI models")
+    print("OPENAI_API_BASE=...          # Optional, defaults to official API")
+    print("\n# Anthropic")
+    print("ANTHROPIC_API_KEY=sk-...     # Required for Anthropic models")
+    print("ANTHROPIC_API_BASE=...       # Optional, defaults to official API")
+    print("\n# Helicone (Optional)")
+    print("HELICONE_API_KEY=sk-...      # Enable request tracking")
+    print("```")
+    print("\nYou'll be prompted to select a model after setup.")
+
+
+# Available models for each provider
 OPENAI_MODELS = [
     "gpt-4-turbo",
     "gpt-4-0125-preview",
@@ -22,16 +45,25 @@ ANTHROPIC_MODELS = [
     "claude-2.1"
 ]
 
-PROVIDER_BASE_URLS = {
-    'openai': {
-        'direct': "https://api.openai.com/v1",
-        'helicone': "https://oai.helicone.ai/v1"
-    },
-    'anthropic': {
-        'direct': "https://api.anthropic.com",
-        'helicone': "https://anthropic.helicone.ai"
-    }
-}
+
+def get_model_choice(provider):
+    """Get the user's choice of model for the selected provider."""
+    models = OPENAI_MODELS if provider == 'openai' else ANTHROPIC_MODELS
+    
+    print(f"\nAvailable {provider.upper()} models:")
+    for i, model in enumerate(models, 1):
+        print(f"{i}. {model}")
+    
+    while True:
+        try:
+            choice = input(f"\nChoose model (1-{len(models)}): ").strip()
+            index = int(choice) - 1
+            if 0 <= index < len(models):
+                return models[index]
+        except ValueError:
+            pass
+        print("Invalid choice. Please enter a number between 1 and "
+              f"{len(models)}.")
 
 
 def get_provider_choice():
@@ -45,79 +77,62 @@ def get_provider_choice():
         print("Invalid choice. Please enter 1 or 2.")
 
 
-def get_model_choice(provider):
-    """Get the user's choice of model for the selected provider."""
-    models = OPENAI_MODELS if provider == 'openai' else ANTHROPIC_MODELS
-    
-    print(f"\nAvailable {provider.upper()} models:")
-    for i, model in enumerate(models, 1):
-        print(f"{i}. {model}")
-    
-    while True:
-        try:
-            choice = input(
-                f"\nChoose model (1-{len(models)}): "
-            ).strip()
-            index = int(choice) - 1
-            if 0 <= index < len(models):
-                return models[index]
-        except ValueError:
-            pass
-        print("Invalid choice. Please enter a number between "
-              f"1 and {len(models)}.")
-
-
-def get_helicone_choice():
-    """Get user's choice whether to use Helicone."""
-    while True:
-        choice = input(
-            "\nUse Helicone for request tracking? (y/n): "
-        ).strip().lower()
-        if choice in ['y', 'n']:
-            return choice == 'y'
-        print("Invalid choice. Please enter 'y' or 'n'.")
-
-
 def get_credentials():
-    """Get API credentials from environment or user input."""
+    """Get API credentials from environment variables."""
     load_dotenv()
     
-    # Get provider and model choice
-    provider = get_provider_choice()
-    model = get_model_choice(provider)
-    use_helicone = get_helicone_choice()
+    # Check for available API keys
+    openai_key = os.getenv("OPENAI_API_KEY")
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    helicone_key = os.getenv("HELICONE_API_KEY")
     
-    # Set up credentials based on provider
-    if provider == 'openai':
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            api_key = input("Enter your OpenAI API key: ").strip()
+    # Determine provider based on available keys
+    if openai_key and anthropic_key:
+        # Both keys available, let user choose
+        provider = get_provider_choice()
+        api_key = openai_key if provider == 'openai' else anthropic_key
+    elif openai_key:
+        provider = 'openai'
+        api_key = openai_key
+    elif anthropic_key:
+        provider = 'anthropic'
+        api_key = anthropic_key
     else:
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            api_key = input("Enter your Anthropic API key: ").strip()
+        print("\nError: No API keys found in .env file")
+        print("Please set either OPENAI_API_KEY or ANTHROPIC_API_KEY")
+        return None, None, None
     
-    # Set up base URL based on provider and Helicone choice
-    routing = 'helicone' if use_helicone else 'direct'
-    api_base_url = PROVIDER_BASE_URLS[provider][routing]
+    # Set up base URL based on provider and Helicone
+    if provider == 'openai':
+        api_base_url = os.getenv("OPENAI_API_BASE")
+        if helicone_key:
+            api_base_url = "https://oai.helicone.ai/v1"
+        elif not api_base_url:
+            api_base_url = "https://api.openai.com/v1"
+    else:  # anthropic
+        api_base_url = os.getenv("ANTHROPIC_API_BASE")
+        if helicone_key:
+            api_base_url = "https://anthropic.helicone.ai"
+        elif not api_base_url:
+            api_base_url = "https://api.anthropic.com"
     
-    if use_helicone:
-        helicone_key = os.getenv("HELICONE_API_KEY")
-        if not helicone_key:
-            print("\nWarning: HELICONE_API_KEY not found in environment.")
-            print("Helicone tracking will not work without an API key.")
+    # Get model choice from user
+    model = get_model_choice(provider)
     
-    print(f"\nConfiguration:")
+    print("\nUsing configuration:")
     print(f"- Provider: {provider.upper()}")
     print(f"- Model: {model}")
-    print(f"- Base URL: {api_base_url}")
-    print(f"- Helicone: {'Enabled' if use_helicone else 'Disabled'}")
+    print(f"- API Base URL: {api_base_url}")
+    print(f"- Helicone: {'Enabled' if helicone_key else 'Disabled'}")
     
-    return provider, model, api_key, api_base_url
+    return api_key, api_base_url, model
 
 
 async def chat():
-    provider, model, api_key, api_base_url = get_credentials()
+    api_key, api_base_url, model = get_credentials()
+    if not api_key:
+        return
+    
     messages = []
     session_id = None
     
@@ -211,6 +226,7 @@ async def chat():
 
 
 if __name__ == "__main__":
+    print_setup_instructions()
     try:
         asyncio.run(chat())
     except KeyboardInterrupt:

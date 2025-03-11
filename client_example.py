@@ -12,6 +12,32 @@ ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 HELICONE_OPENAI_BASE_URL = "https://oai.helicone.ai/v1"
 HELICONE_ANTHROPIC_BASE_URL = "https://anthropic.helicone.ai/"
 
+# Provider-specific models and configurations
+OPENAI_MODELS = [
+    "gpt-4-turbo",
+    "gpt-4-0125-preview", 
+    "gpt-4",
+    "gpt-3.5-turbo"
+]
+
+ANTHROPIC_MODELS = [
+    "claude-3-opus-20240229",
+    "claude-3-sonnet-20240229", 
+    "claude-3-haiku-20240229",
+    "claude-2.1"
+]
+
+PROVIDER_BASE_URLS = {
+    'openai': {
+        'direct': "https://api.openai.com/v1",
+        'helicone': "https://oai.helicone.ai/v1"
+    },
+    'anthropic': {
+        'direct': "https://api.anthropic.com",
+        'helicone': "https://anthropic.helicone.ai"
+    }
+}
+
 
 def check_api_key():
     if not os.path.exists(".env"):
@@ -62,44 +88,96 @@ class Conversation:
         self.model = model
 
 
+def get_provider_choice():
+    """Get the user's choice of AI provider."""
+    while True:
+        choice = input(
+            "\nChoose AI provider (1 for OpenAI, 2 for Anthropic): "
+        ).strip()
+        if choice in ['1', '2']:
+            return 'openai' if choice == '1' else 'anthropic'
+        print("Invalid choice. Please enter 1 or 2.")
+
+
+def get_model_choice(provider):
+    """Get the user's choice of model for the selected provider."""
+    models = OPENAI_MODELS if provider == 'openai' else ANTHROPIC_MODELS
+    
+    print(f"\nAvailable {provider.upper()} models:")
+    for i, model in enumerate(models, 1):
+        print(f"{i}. {model}")
+    
+    while True:
+        try:
+            choice = input(f"\nChoose model (1-{len(models)}): ").strip()
+            index = int(choice) - 1
+            if 0 <= index < len(models):
+                return models[index]
+        except ValueError:
+            pass
+        print("Invalid choice. Please enter a number between 1 and "
+              f"{len(models)}.")
+
+
+def get_helicone_choice():
+    """Get user's choice whether to use Helicone."""
+    while True:
+        choice = input(
+            "\nUse Helicone for request tracking? (y/n): "
+        ).strip().lower()
+        if choice in ['y', 'n']:
+            return choice == 'y'
+        print("Invalid choice. Please enter 'y' or 'n'.")
+
+
 def get_api_config() -> Dict[str, str]:
-    """Get API configuration from environment variables."""
+    """Get API configuration from environment variables or user input."""
     load_dotenv()
     
-    # Get API keys
+    # Check for available API keys
     openai_key = os.getenv("OPENAI_API_KEY")
     anthropic_key = os.getenv("ANTHROPIC_API_KEY")
     helicone_key = os.getenv("HELICONE_API_KEY")
     
-    # Determine which API to use based on available keys
-    if helicone_key:
-        if anthropic_key:
-            return {
-                "api_key": anthropic_key,
-                "api_base_url": HELICONE_ANTHROPIC_BASE_URL,
-                "model": "claude-3-opus-20240229"
-            }
-        elif openai_key:
-            return {
-                "api_key": openai_key,
-                "api_base_url": HELICONE_OPENAI_BASE_URL,
-                "model": "gpt-4-turbo-preview"
-            }
+    # Determine provider based on available keys
+    if openai_key and anthropic_key:
+        # Both keys available, let user choose
+        provider = get_provider_choice()
+        api_key = openai_key if provider == 'openai' else anthropic_key
+    elif openai_key:
+        provider = 'openai'
+        api_key = openai_key
+    elif anthropic_key:
+        provider = 'anthropic'
+        api_key = anthropic_key
     else:
-        if anthropic_key:
-            return {
-                "api_key": anthropic_key,
-                "api_base_url": ANTHROPIC_BASE_URL,
-                "model": "claude-3-opus-20240229"
-            }
-        elif openai_key:
-            return {
-                "api_key": openai_key,
-                "api_base_url": OPENAI_BASE_URL,
-                "model": "gpt-4-turbo-preview"
-            }
+        print("\nNo API keys found in environment.")
+        provider = get_provider_choice()
+        if provider == 'openai':
+            api_key = input("Enter your OpenAI API key: ").strip()
+        else:
+            api_key = input("Enter your Anthropic API key: ").strip()
     
-    return {}
+    # Get model choice from user
+    model = get_model_choice(provider)
+    
+    # Set up base URL based on provider and Helicone
+    if helicone_key:
+        api_base_url = PROVIDER_BASE_URLS[provider]['helicone']
+        print("\nHelicone request tracking enabled")
+    else:
+        api_base_url = PROVIDER_BASE_URLS[provider]['direct']
+    
+    print("\nUsing configuration:")
+    print(f"- Provider: {provider.upper()}")
+    print(f"- Model: {model}")
+    print(f"- API Base URL: {api_base_url}")
+    
+    return {
+        "api_key": api_key,
+        "api_base_url": api_base_url,
+        "model": model
+    }
 
 
 def stream_response(

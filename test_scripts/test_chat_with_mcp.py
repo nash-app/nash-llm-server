@@ -9,7 +9,6 @@ def convert_tools_to_dict(tools_result):
     """Convert MCP tools result to JSON-serializable format."""
     tools = []
     for tool in tools_result.tools:
-        # Print tool for debugging
         tools.append({
             "name": tool.name,
             "description": tool.description,
@@ -38,8 +37,6 @@ async def chat():
         "role": "system",
         "content": system_prompt
     })
-
-    print(system_prompt)
     
     try:
         while True:
@@ -67,34 +64,25 @@ async def chat():
                     try:
                         parsed = json.loads(chunk.replace("data: ", ""))
                         content = parsed.get("content", "")
-                        print(f"\nDEBUG Raw chunk: {chunk}")
-                        print(f"DEBUG Parsed content: {content}")
                         print(content, end="", flush=True)
                         assistant_message += content
                     except json.JSONDecodeError as e:
                         print(f"\nFailed to parse chunk: {chunk}")
                         print(f"Error: {e}")
-                        
-            print("\nDEBUG Full assistant message:", assistant_message)
             
-            # Add assistant response to history and check for TOOL CALL
+            # Add assistant response to history and check for function calls
             if assistant_message:
                 # Check for function call tag
                 if "<function_call>" in assistant_message:
-                    print("\nFUNCTION CALL DETECTED")
-                    # Extract content between function call tags
                     start_tag = "<function_call>"
                     end_tag = "</function_call>"
-                    start_idx = (
-                        assistant_message.find(start_tag) + len(start_tag)
-                    )
+                    start_idx = assistant_message.find(start_tag) + len(start_tag)
                     end_idx = assistant_message.find(end_tag)
                     
                     if start_idx > -1 and end_idx > -1:
                         json_str = assistant_message[start_idx:end_idx].strip()
                         try:
                             function_calls = json.loads(json_str)
-                            print("Function calls:", function_calls)
                             
                             # Execute each function call
                             for call in function_calls:
@@ -103,20 +91,16 @@ async def chat():
                                 arguments = function.get("arguments", {})
                                 
                                 if tool_name:
-                                    print(
-                                        f"\nExecuting {tool_name} with args:",
-                                        arguments
-                                    )
                                     tool_result = await mcp.call_tool(
                                         tool_name,
                                         arguments=arguments
                                     )
-                                    print("\nTool result:", tool_result)
+                                    print(f"\n{tool_result}")
                                 
                         except json.JSONDecodeError as e:
-                            print(f"Failed to parse function data: {e}")
+                            print(f"\nError parsing function data: {e}")
                         except Exception as e:
-                            print(f"Function call failed: {e}")
+                            print(f"\nError executing function: {e}")
                         
                 messages.append({
                     "role": "assistant", 
@@ -129,7 +113,7 @@ async def chat():
         # Clean up MCP
         await mcp.close()
     
-    print("\nChat ended. Final message count:", len(messages))
+    print("\nChat ended.")
 
 
 if __name__ == "__main__":
@@ -137,9 +121,7 @@ if __name__ == "__main__":
         asyncio.run(chat())
     except KeyboardInterrupt:
         print("\nStopped by user")
-        # Ensure MCP cleanup on keyboard interrupt
         asyncio.run(MCPHandler.get_instance().close())
     except Exception as e:
         print(f"\nUnexpected error: {e}")
-        # Ensure MCP cleanup on unexpected errors
         asyncio.run(MCPHandler.get_instance().close())

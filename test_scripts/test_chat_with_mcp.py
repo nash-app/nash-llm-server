@@ -96,6 +96,28 @@ async def chat():
                                         arguments=arguments
                                     )
                                     print(f"\n{tool_result}")
+                                    
+                                    # Add tool result to message history
+                                    messages.append({
+                                        "role": "function",
+                                        "name": tool_name,
+                                        "content": str(tool_result)
+                                    })
+                                    
+                                    # Get LLM's response to the tool result
+                                    async for chunk in stream_llm_response(messages):
+                                        if "error" in chunk:
+                                            print("\nError:", chunk)
+                                            break
+                                            
+                                        if "[DONE]" not in chunk:
+                                            try:
+                                                parsed = json.loads(chunk.replace("data: ", ""))
+                                                content = parsed.get("content", "")
+                                                print(content, end="", flush=True)
+                                                assistant_message += content
+                                            except json.JSONDecodeError as e:
+                                                print(f"\nError parsing chunk: {e}")
                                 
                         except json.JSONDecodeError as e:
                             print(f"\nError parsing function data: {e}")

@@ -2,8 +2,42 @@ import requests
 import json
 import sys
 import os
-from typing import Generator, List, Dict
+from typing import Generator, List, Dict, Optional
 from dotenv import load_dotenv
+
+
+# Provider-specific base URLs
+OPENAI_BASE_URL = "https://api.openai.com/v1"
+ANTHROPIC_BASE_URL = "https://api.anthropic.com"
+HELICONE_OPENAI_BASE_URL = "https://oai.helicone.ai/v1"
+HELICONE_ANTHROPIC_BASE_URL = "https://anthropic.helicone.ai/"
+
+# Provider-specific models and configurations
+OPENAI_MODELS = [
+    "gpt-4-turbo",
+    "gpt-4-0125-preview", 
+    "gpt-4",
+    "gpt-3.5-turbo"
+]
+
+ANTHROPIC_MODELS = [
+    "claude-3-opus-20240229",
+    "claude-3-sonnet-20240229",
+    "claude-3-haiku-20240307",
+    "claude-3-5-sonnet-20241022",
+    "claude-3-5-haiku-20241022"
+]
+
+PROVIDER_BASE_URLS = {
+    'openai': {
+        'direct': "https://api.openai.com/v1",
+        'helicone': "https://oai.helicone.ai/v1"
+    },
+    'anthropic': {
+        'direct': "https://api.anthropic.com",
+        'helicone': "https://anthropic.helicone.ai"
+    }
+}
 
 
 def check_api_key():
@@ -11,21 +45,23 @@ def check_api_key():
         print("Error: .env file not found.")
         print("Please create one based on .env.example:")
         print("cp .env.example .env")
-        print("Then edit .env with your OpenAI API key")
+        print("Then edit .env with your API keys")
         sys.exit(1)
     
     load_dotenv()
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
-        print("Error: OPENAI_API_KEY not set in .env file")
-        print("Please edit .env and add your OpenAI API key")
-        sys.exit(1)
+        print("Warning: No API keys found in .env file")
+        print("You will need to provide an API key in your requests")
 
 
 class Conversation:
     def __init__(self):
         self.messages: List[Dict[str, str]] = []
         self.session_id: str = None
+        self.api_key: Optional[str] = None
+        self.api_base_url: Optional[str] = None
+        self.model: Optional[str] = None
 
     def add_message(self, role: str, content: str):
         """Add a message to the conversation history."""
@@ -40,11 +76,117 @@ class Conversation:
         """Replace current messages with new ones."""
         self.messages = messages
 
+    def set_api_key(self, api_key: str):
+        """Set the API key to use for requests."""
+        self.api_key = api_key
+
+    def set_api_base_url(self, api_base_url: str):
+        """Set the API base URL to use for requests."""
+        self.api_base_url = api_base_url
+
+    def set_model(self, model: str):
+        """Set the model to use for requests."""
+        self.model = model
+
+
+def get_provider_choice():
+    """Get the user's choice of AI provider."""
+    while True:
+        choice = input(
+            "\nChoose AI provider (1 for OpenAI, 2 for Anthropic): "
+        ).strip()
+        if choice in ['1', '2']:
+            return 'openai' if choice == '1' else 'anthropic'
+        print("Invalid choice. Please enter 1 or 2.")
+
+
+def get_model_choice(provider):
+    """Get the user's choice of model for the selected provider."""
+    models = OPENAI_MODELS if provider == 'openai' else ANTHROPIC_MODELS
+    
+    print(f"\nAvailable {provider.upper()} models:")
+    for i, model in enumerate(models, 1):
+        print(f"{i}. {model}")
+    
+    while True:
+        try:
+            choice = input(f"\nChoose model (1-{len(models)}): ").strip()
+            index = int(choice) - 1
+            if 0 <= index < len(models):
+                return models[index]
+        except ValueError:
+            pass
+        print("Invalid choice. Please enter a number between 1 and "
+              f"{len(models)}.")
+
+
+def get_helicone_choice():
+    """Get user's choice whether to use Helicone."""
+    while True:
+        choice = input(
+            "\nUse Helicone for request tracking? (y/n): "
+        ).strip().lower()
+        if choice in ['y', 'n']:
+            return choice == 'y'
+        print("Invalid choice. Please enter 'y' or 'n'.")
+
+
+def get_api_config() -> Dict[str, str]:
+    """Get API configuration from environment variables or user input."""
+    load_dotenv()
+    
+    # Check for available API keys
+    openai_key = os.getenv("OPENAI_API_KEY")
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    helicone_key = os.getenv("HELICONE_API_KEY")
+    
+    # Determine provider based on available keys
+    if openai_key and anthropic_key:
+        # Both keys available, let user choose
+        provider = get_provider_choice()
+        api_key = openai_key if provider == 'openai' else anthropic_key
+    elif openai_key:
+        provider = 'openai'
+        api_key = openai_key
+    elif anthropic_key:
+        provider = 'anthropic'
+        api_key = anthropic_key
+    else:
+        print("\nNo API keys found in environment.")
+        provider = get_provider_choice()
+        if provider == 'openai':
+            api_key = input("Enter your OpenAI API key: ").strip()
+        else:
+            api_key = input("Enter your Anthropic API key: ").strip()
+    
+    # Get model choice from user
+    model = get_model_choice(provider)
+    
+    # Set up base URL based on provider and Helicone
+    if helicone_key:
+        api_base_url = PROVIDER_BASE_URLS[provider]['helicone']
+        print("\nHelicone request tracking enabled")
+    else:
+        api_base_url = PROVIDER_BASE_URLS[provider]['direct']
+    
+    print("\nUsing configuration:")
+    print(f"- Provider: {provider.upper()}")
+    print(f"- Model: {model}")
+    print(f"- API Base URL: {api_base_url}")
+    
+    return {
+        "api_key": api_key,
+        "api_base_url": api_base_url,
+        "model": model
+    }
+
 
 def stream_response(
     messages: List[Dict[str, str]],
     model: str = None,
-    session_id: str = None
+    session_id: str = None,
+    api_key: Optional[str] = None,
+    api_base_url: Optional[str] = None
 ) -> Generator[str, None, None]:
     try:
         print("\n=== Stream Response Start ===")
@@ -56,10 +198,11 @@ def stream_response(
         
         payload = {
             "messages": messages,
-            "session_id": session_id
+            "session_id": session_id,
+            "model": model,
+            "api_key": api_key,
+            "api_base_url": api_base_url
         }
-        if model:
-            payload["model"] = model
             
         print("\nSending request to server...")
         response = requests.post(
@@ -169,16 +312,24 @@ def stream_response(
 
 def summarize_conversation(
     messages: List[Dict[str, str]],
-    session_id: str = None
+    model: str = None,
+    session_id: str = None,
+    api_key: Optional[str] = None,
+    api_base_url: Optional[str] = None
 ) -> Dict:
     """Request conversation summarization from the server."""
     try:
+        payload = {
+            "messages": messages,
+            "model": model,
+            "session_id": session_id,
+            "api_key": api_key,
+            "api_base_url": api_base_url
+        }
+            
         response = requests.post(
             "http://localhost:8001/v1/chat/summarize",
-            json={
-                "messages": messages,
-                "session_id": session_id
-            }
+            json=payload
         )
         
         if response.status_code != 200:
@@ -230,10 +381,20 @@ def chat_loop():
     first_message = True
     message_count = 0
     
+    # Get API configuration from environment
+    api_config = get_api_config()
+    if api_config:
+        conversation.set_api_key(api_config["api_key"])
+        conversation.set_api_base_url(api_config["api_base_url"])
+        conversation.set_model(api_config["model"])
+    
     print("\n=== Chat Session Started ===")
     print("Commands:")
     print("- 'exit': End the conversation")
     print("- 'summarize': Summarize conversation to reduce length")
+    print("- 'set-api-key <key>': Set API key for requests")
+    print("- 'set-base-url <url>': Set API base URL for requests")
+    print("- 'set-model <model>': Set model to use for requests")
     print("-" * 60)
     
     while True:
@@ -244,6 +405,14 @@ def chat_loop():
                 print(f"Session: {conversation.session_id[:8]}...")
             else:
                 print("Session: None")
+            if conversation.api_key:
+                print(f"API Key: {conversation.api_key[:6]}...")
+            else:
+                print("API Key: Using environment variable")
+            if conversation.api_base_url:
+                print(f"API Base URL: {conversation.api_base_url}")
+            if conversation.model:
+                print(f"Model: {conversation.model}")
             
             user_input = input("\nYou: ").strip()
             
@@ -257,7 +426,10 @@ def chat_loop():
                 print("\n=== Summarizing Conversation ===")
                 result = summarize_conversation(
                     conversation.get_messages(),
-                    conversation.session_id
+                    conversation.model,
+                    conversation.session_id,
+                    conversation.api_key,
+                    conversation.api_base_url
                 )
                 if print_summarization_result(result):
                     conversation.set_messages(result["messages"])
@@ -265,11 +437,40 @@ def chat_loop():
                         conversation.session_id = result["session_id"]
                 continue
             
+            if user_input.lower().startswith('set-api-key '):
+                api_key = user_input[11:].strip()
+                if api_key:
+                    conversation.set_api_key(api_key)
+                    print(f"\nAPI key set: {api_key[:6]}...")
+                else:
+                    print("\nError: Please provide an API key")
+                continue
+            
+            if user_input.lower().startswith('set-base-url '):
+                api_base_url = user_input[12:].strip()
+                if api_base_url:
+                    conversation.set_api_base_url(api_base_url)
+                    print(f"\nAPI base URL set: {api_base_url}")
+                else:
+                    print("\nError: Please provide an API base URL")
+                continue
+            
+            if user_input.lower().startswith('set-model '):
+                model = user_input[9:].strip()
+                if model:
+                    conversation.set_model(model)
+                    print(f"\nModel set: {model}")
+                else:
+                    print("\nError: Please provide a model name")
+                continue
+            
             # Add user message to history
             conversation.add_message("user", user_input)
             
             # Only send session_id after first message
-            current_session_id = None if first_message else conversation.session_id
+            current_session_id = (
+                None if first_message else conversation.session_id
+            )
             
             print("\nAssistant:", end=" ", flush=True)
             
@@ -281,7 +482,10 @@ def chat_loop():
             got_session_id = False
             for chunk in stream_response(
                 conversation.get_messages(),
-                session_id=current_session_id
+                conversation.model,
+                current_session_id,
+                conversation.api_key,
+                conversation.api_base_url
             ):
                 if isinstance(chunk, tuple):
                     # This is the final response tuple

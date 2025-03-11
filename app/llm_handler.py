@@ -2,40 +2,76 @@ from litellm import acompletion
 import json
 import os
 import litellm
+import uuid
 from dotenv import load_dotenv
+from .prompts import SUMMARIZE_SYSTEM_PROMPT
 
 
-DEFAULT_MODEL = "gpt-4-turbo"
+def get_helicone_headers(session_id: str = None) -> dict:
+    """Get Helicone headers, creating a new session ID if none provided."""
+    headers = {}
+    helicone_api_key = os.getenv('HELICONE_API_KEY')
+    if helicone_api_key:
+        headers["Helicone-Auth"] = f"Bearer {helicone_api_key}"
+        new_session = str(uuid.uuid4()) if not session_id else session_id
+        headers["Helicone-Session-Id"] = new_session
+        headers["Helicone-Session-Name"] = "DIRECT"
+    return headers
 
 
-def configure_llm():
+def configure_llm(api_key: str = None, api_base_url: str = None):
     """Configure LiteLLM with API keys and settings."""
     load_dotenv()
 
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise ValueError("OPENAI_API_KEY environment variable is required")
+    if api_key:
+        litellm.api_key = api_key
+    if api_base_url:
+        litellm.api_base = api_base_url
 
-    litellm.api_key = api_key
+    # Configure Helicone if available
+    helicone_api_key = os.getenv('HELICONE_API_KEY')
+    if helicone_api_key:
+        litellm.headers = {
+            "Helicone-Auth": f"Bearer {helicone_api_key}",
+        }
 
 
-async def stream_llm_response(messages: list = None, model: str = None):
+async def stream_llm_response(
+    messages: list = None,
+    model: str = None,
+    api_key: str = None,
+    api_base_url: str = None,
+    session_id: str = None
+):
     """Stream responses from the LLM.
 
     Args:
         messages: List of message dictionaries with 'role' and 'content'
         model: Optional model override
+        api_key: Optional API key override
+        api_base_url: Optional API base URL override
+        session_id: Optional session ID for tracking
 
     Yields:
         SSE formatted JSON strings with content or error messages
     """
-    response = None
     try:
         if not messages:
             messages = []
 
+        # Configure LLM with provided credentials
+        configure_llm(api_key, api_base_url)
+        
+        # Get headers with session ID
+        headers = get_helicone_headers(session_id)
+        litellm.headers.update(headers)
+        session_id = headers.get('Helicone-Session-Id')
+
+        # Send session ID in first chunk
+        yield f"data: {json.dumps({'session_id': session_id})}\n\n"
+
         response = await acompletion(
-            model=model or DEFAULT_MODEL,
+            model=model,
             messages=messages,
             stream=True,
             temperature=0.7
@@ -52,6 +88,90 @@ async def stream_llm_response(messages: list = None, model: str = None):
     except Exception as e:
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
     finally:
+        # Always send DONE with session ID to ensure client has it
+        yield f"data: {json.dumps({'session_id': session_id})}\n\n"
         yield "data: [DONE]\n\n"
-        if response and hasattr(response, 'aclose'):
-            await response.aclose()
+
+
+async def summarize_conversation(
+    messages: list,
+    model: str,
+    api_key: str = None,
+    api_base_url: str = None,
+    session_id: str = None
+) -> dict:
+    """Summarize a conversation to reduce token count while preserving context."""
+    try:
+        if not messages:
+            return {"error": "No messages to summarize"}
+        
+        # Configure LLM with provided credentials
+        configure_llm(api_key, api_base_url)
+        
+        # Keep system message separate if it exists
+        system_msg = None
+        if messages and messages[0]["role"] == "system":
+            system_msg = messages[0]
+            messages = messages[1:]
+        
+        # Prepare messages for summarization
+        summary_request = [
+            {"role": "system", "content": SUMMARIZE_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    "Please summarize this conversation:\n\n"
+                    + "\n".join([
+                        f"{m['role']}: {m['content']}"
+                        for m in messages
+                    ])
+                )
+            }
+        ]
+        
+        # Get headers with session ID
+        headers = get_helicone_headers(session_id)
+        litellm.headers.update(headers)
+        
+        response = await acompletion(
+            model=model,
+            messages=summary_request,
+            stream=False
+        )
+        
+        summary = response.choices[0].message.content
+        
+        # Create new conversation with summary
+        summarized_messages = []
+        if system_msg:
+            summarized_messages.append(system_msg)
+        
+        summarized_messages.extend([
+            {
+                "role": "assistant",
+                "content": "Previous conversation summary:\n" + summary
+            }
+        ])
+        
+        # Estimate tokens for before/after comparison
+        tokens_before = sum(
+            len(str(msg.get("content", ""))) // 4 for msg in messages
+        )
+        tokens_after = sum(
+            len(str(msg.get("content", ""))) // 4 
+            for msg in summarized_messages
+        )
+        
+        return {
+            "success": True,
+            "summary": summary,
+            "messages": summarized_messages,
+            "token_reduction": {
+                "before": tokens_before,
+                "after": tokens_after
+            },
+            "session_id": headers['Helicone-Session-Id']
+        }
+        
+    except Exception as e:
+        return {"error": f"Error during summarization: {str(e)}"}

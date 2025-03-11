@@ -6,8 +6,7 @@ from fastapi.responses import StreamingResponse
 
 from .llm_handler import stream_llm_response, configure_llm
 from .mcp_handler import MCPHandler
-from .prompts.system_prompt_generator import generate_tool_system_prompt
-from .prompts.helpers import convert_tools_to_dict
+from .prompts import get_system_prompt
 
 
 SYSTEM_PROMPT = ""
@@ -37,14 +36,9 @@ async def startup_event():
     # Get available tools
     tools = await mcp.list_tools()
 
-    # Convert tools to JSON-serializable format
-    tools_dict = convert_tools_to_dict(tools)
-
-    global SYSTEM_PROMPT
     # Generate system prompt with tool definitions
-    SYSTEM_PROMPT = generate_tool_system_prompt(
-        tool_definitions=json.dumps(tools_dict, indent=2)
-    )
+    global SYSTEM_PROMPT
+    SYSTEM_PROMPT = get_system_prompt(tools)
 
 
 @app.on_event("shutdown")

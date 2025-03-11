@@ -2,8 +2,7 @@ import asyncio
 import json
 from app.llm_handler import configure_llm, stream_llm_response
 from app.mcp_handler import MCPHandler
-from app.prompts.system_prompt_generator import generate_tool_system_prompt
-from app.prompts.helpers import convert_tools_to_dict
+from app.prompts import get_system_prompt
 
 
 async def chat():
@@ -14,14 +13,9 @@ async def chat():
     mcp = MCPHandler.get_instance()
     await mcp.initialize()
     tools = await mcp.list_tools()
-    
-    # Convert tools to JSON-serializable format
-    tools_dict = convert_tools_to_dict(tools)
-    
-    # Generate system prompt with tool definitions
-    system_prompt = generate_tool_system_prompt(
-        tool_definitions=json.dumps(tools_dict, indent=2)
-    )
+
+    system_prompt = get_system_prompt(tools)
+
     messages.append({
         "role": "system",
         "content": system_prompt

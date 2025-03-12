@@ -9,8 +9,6 @@ from dotenv import load_dotenv
 # Provider-specific base URLs
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 ANTHROPIC_BASE_URL = "https://api.anthropic.com"
-HELICONE_OPENAI_BASE_URL = "https://oai.helicone.ai/v1"
-HELICONE_ANTHROPIC_BASE_URL = "https://anthropic.helicone.ai/"
 
 # Provider-specific models and configurations
 OPENAI_MODELS = [
@@ -30,12 +28,10 @@ ANTHROPIC_MODELS = [
 
 PROVIDER_BASE_URLS = {
     'openai': {
-        'direct': "https://api.openai.com/v1",
-        'helicone': "https://oai.helicone.ai/v1"
+        'direct': "https://api.openai.com/v1"
     },
     'anthropic': {
-        'direct': "https://api.anthropic.com",
-        'helicone': "https://anthropic.helicone.ai"
+        'direct': "https://api.anthropic.com"
     }
 }
 
@@ -120,17 +116,6 @@ def get_model_choice(provider):
               f"{len(models)}.")
 
 
-def get_helicone_choice():
-    """Get user's choice whether to use Helicone."""
-    while True:
-        choice = input(
-            "\nUse Helicone for request tracking? (y/n): "
-        ).strip().lower()
-        if choice in ['y', 'n']:
-            return choice == 'y'
-        print("Invalid choice. Please enter 'y' or 'n'.")
-
-
 def get_api_config() -> Dict[str, str]:
     """Get API configuration from environment variables or user input."""
     load_dotenv()
@@ -138,7 +123,6 @@ def get_api_config() -> Dict[str, str]:
     # Check for available API keys
     openai_key = os.getenv("OPENAI_API_KEY")
     anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-    helicone_key = os.getenv("HELICONE_API_KEY")
     
     # Determine provider based on available keys
     if openai_key and anthropic_key:
@@ -159,15 +143,18 @@ def get_api_config() -> Dict[str, str]:
         else:
             api_key = input("Enter your Anthropic API key: ").strip()
     
+    # Set up base URL based on provider
+    if provider == 'openai':
+        api_base_url = os.getenv("OPENAI_API_BASE")
+        if not api_base_url:
+            api_base_url = "https://api.openai.com/v1"
+    else:  # anthropic
+        api_base_url = os.getenv("ANTHROPIC_API_BASE")
+        if not api_base_url:
+            api_base_url = "https://api.anthropic.com"
+    
     # Get model choice from user
     model = get_model_choice(provider)
-    
-    # Set up base URL based on provider and Helicone
-    if helicone_key:
-        api_base_url = PROVIDER_BASE_URLS[provider]['helicone']
-        print("\nHelicone request tracking enabled")
-    else:
-        api_base_url = PROVIDER_BASE_URLS[provider]['direct']
     
     print("\nUsing configuration:")
     print(f"- Provider: {provider.upper()}")

@@ -1,6 +1,5 @@
 from litellm import acompletion
 import json
-import os
 import litellm
 import uuid
 from dotenv import load_dotenv
@@ -39,16 +38,9 @@ def validate_api_key(api_key: Optional[str] = None) -> None:
         )
 
 
-def get_helicone_headers(session_id: str = None) -> dict:
-    """Get Helicone headers, creating a new session ID if none provided."""
-    headers = {}
-    helicone_api_key = os.getenv('HELICONE_API_KEY')
-    if helicone_api_key:
-        headers["Helicone-Auth"] = f"Bearer {helicone_api_key}"
-        new_session = str(uuid.uuid4()) if not session_id else session_id
-        headers["Helicone-Session-Id"] = new_session
-        headers["Helicone-Session-Name"] = "DIRECT"
-    return headers
+def get_session_id(session_id: str = None) -> str:
+    """Get session ID, creating a new one if none provided."""
+    return str(uuid.uuid4()) if not session_id else session_id
 
 
 def configure_llm(api_key: str = None, api_base_url: str = None):
@@ -63,12 +55,8 @@ def configure_llm(api_key: str = None, api_base_url: str = None):
     # Validate API key
     validate_api_key()
 
-    # Configure Helicone if available
-    helicone_api_key = os.getenv('HELICONE_API_KEY')
-    if helicone_api_key:
-        litellm.headers = {
-            "Helicone-Auth": f"Bearer {helicone_api_key}",
-        }
+    # Initialize headers
+    litellm.headers = {}
 
 
 async def stream_llm_response(
@@ -97,10 +85,8 @@ async def stream_llm_response(
         # Configure LLM with provided credentials
         configure_llm(api_key, api_base_url)
         
-        # Get headers with session ID
-        headers = get_helicone_headers(session_id)
-        litellm.headers.update(headers)
-        session_id = headers.get('Helicone-Session-Id')
+        # Get or create session ID
+        session_id = get_session_id(session_id)
 
         # Send session ID in first chunk
         yield f"data: {json.dumps({'session_id': session_id})}\n\n"
@@ -168,9 +154,8 @@ async def summarize_conversation(
             }
         ]
         
-        # Get headers with session ID
-        headers = get_helicone_headers(session_id)
-        litellm.headers.update(headers)
+        # Get or create session ID
+        session_id = get_session_id(session_id)
         
         response = await acompletion(
             model=model,
@@ -209,7 +194,7 @@ async def summarize_conversation(
                 "before": tokens_before,
                 "after": tokens_after
             },
-            "session_id": headers['Helicone-Session-Id']
+            "session_id": session_id
         }
         
     except Exception as e:

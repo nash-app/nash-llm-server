@@ -24,8 +24,6 @@ def print_setup_instructions():
     print("\n# Anthropic")
     print("ANTHROPIC_API_KEY=sk-...     # Required for Anthropic models")
     print("ANTHROPIC_API_BASE=...       # Optional, defaults to official API")
-    print("\n# Helicone (Optional)")
-    print("HELICONE_API_KEY=sk-...      # Enable request tracking")
     print("```")
     print("\nYou'll be prompted to select a model after setup.")
 
@@ -85,7 +83,6 @@ def get_credentials():
     # Check for available API keys
     openai_key = os.getenv("OPENAI_API_KEY")
     anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-    helicone_key = os.getenv("HELICONE_API_KEY")
     
     # Determine provider based on available keys
     if openai_key and anthropic_key:
@@ -103,18 +100,14 @@ def get_credentials():
         print("Please set either OPENAI_API_KEY or ANTHROPIC_API_KEY")
         return None, None, None
     
-    # Set up base URL based on provider and Helicone
+    # Set up base URL based on provider
     if provider == 'openai':
         api_base_url = os.getenv("OPENAI_API_BASE")
-        if helicone_key:
-            api_base_url = "https://oai.helicone.ai/v1"
-        elif not api_base_url:
+        if not api_base_url:
             api_base_url = "https://api.openai.com/v1"
     else:  # anthropic
         api_base_url = os.getenv("ANTHROPIC_API_BASE")
-        if helicone_key:
-            api_base_url = "https://anthropic.helicone.ai"
-        elif not api_base_url:
+        if not api_base_url:
             api_base_url = "https://api.anthropic.com"
     
     # Get model choice from user
@@ -124,7 +117,6 @@ def get_credentials():
     print(f"- Provider: {provider.upper()}")
     print(f"- Model: {model}")
     print(f"- API Base URL: {api_base_url}")
-    print(f"- Helicone: {'Enabled' if helicone_key else 'Disabled'}")
     
     return api_key, api_base_url, model
 

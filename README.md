@@ -24,7 +24,6 @@ The test script provides an interactive CLI that allows you to:
 - Select from available models:
   - OpenAI: gpt-4-turbo, gpt-4-0125-preview, gpt-4, gpt-3.5-turbo
   - Anthropic: claude-3-opus/sonnet/haiku, claude-2.1
-- Enable/disable Helicone request tracking
 - Test conversation summarization
 - View session IDs and token usage
 
@@ -35,7 +34,6 @@ Create a `.env` file with your API keys:
 ```bash
 OPENAI_API_KEY=sk-...      # Required for OpenAI models
 ANTHROPIC_API_KEY=sk-...   # Required for Anthropic models
-HELICONE_API_KEY=sk-...    # Optional, for request tracking
 ```
 
 ## Architecture
@@ -214,8 +212,6 @@ The server supports multiple LLM providers through their respective base URLs:
 
 - OpenAI: `https://api.openai.com/v1`
 - Anthropic: `https://api.anthropic.com`
-- Helicone OpenAI: `https://oai.helicone.ai/v1`
-- Helicone Anthropic: `https://anthropic.helicone.ai`
 
 ## Client Implementation Tips
 
@@ -234,6 +230,5 @@ The server supports multiple LLM providers through their respective base URLs:
 3. **API Configuration**
    - Always provide model, api_key, and api_base_url
    - Use appropriate base URL for your provider
-   - Consider using Helicone for observability
 
 See `client_example.py` for a complete implementation.

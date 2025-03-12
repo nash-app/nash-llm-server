@@ -1,6 +1,6 @@
-# nash-llm-server
+# nash-local-server
 
-A local server for LLM interactions with proper session handling and streaming responses.
+A local server for LLM interactions and MCP usage with proper session handling and streaming responses.
 
 ## Quick Start
 

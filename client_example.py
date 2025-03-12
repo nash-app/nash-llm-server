@@ -206,7 +206,7 @@ def stream_response(
             
         print("\nSending request to server...")
         response = requests.post(
-            "http://localhost:8001/v1/chat/completions/stream",
+            "http://localhost:6274/v1/chat/completions/stream",
             json=payload,
             stream=True,
         )
@@ -328,7 +328,7 @@ def summarize_conversation(
         }
             
         response = requests.post(
-            "http://localhost:8001/v1/chat/summarize",
+            "http://localhost:6274/v1/chat/summarize",
             json=payload
         )
         

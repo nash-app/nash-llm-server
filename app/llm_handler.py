@@ -5,6 +5,38 @@ import litellm
 import uuid
 from dotenv import load_dotenv
 from .prompts import SUMMARIZE_SYSTEM_PROMPT
+from typing import Optional
+
+
+class InvalidAPIKeyError(Exception):
+    """Raised when an API key is invalid or missing."""
+    pass
+
+
+def validate_api_key(api_key: Optional[str] = None) -> None:
+    """Validate that an API key is present and has the correct format.
+    
+    Args:
+        api_key: The API key to validate
+        
+    Raises:
+        InvalidAPIKeyError: If the API key is missing or invalid
+    """
+    if not api_key and not litellm.api_key:
+        raise InvalidAPIKeyError(
+            "No API key provided. Please set a valid API key."
+        )
+    
+    key_to_check = api_key or litellm.api_key
+    if not isinstance(key_to_check, str):
+        raise InvalidAPIKeyError("API key must be a string.")
+        
+    # Basic format validation for common API key formats
+    if not (key_to_check.startswith('sk-') and len(key_to_check) > 20):
+        raise InvalidAPIKeyError(
+            "Invalid API key format. API keys should start with 'sk-' "
+            "and be at least 20 characters long."
+        )
 
 
 def get_helicone_headers(session_id: str = None) -> dict:
@@ -27,6 +59,9 @@ def configure_llm(api_key: str = None, api_base_url: str = None):
         litellm.api_key = api_key
     if api_base_url:
         litellm.api_base = api_base_url
+
+    # Validate API key
+    validate_api_key()
 
     # Configure Helicone if available
     helicone_api_key = os.getenv('HELICONE_API_KEY')
@@ -82,6 +117,10 @@ async def stream_llm_response(
                 content = chunk.choices[0].delta.content
                 if content:
                     yield f"data: {json.dumps({'content': content})}\n\n"
+    except InvalidAPIKeyError as e:
+        error_msg = f"API Key Error: {str(e)}"
+        msg_data = {'error': error_msg}
+        yield f"data: {json.dumps(msg_data)}\n\n"
     except GeneratorExit:
         # Handle generator cleanup gracefully
         return

@@ -5,7 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import json
 
-from .llm_handler import stream_llm_response, summarize_conversation
+from .llm_handler import (
+    stream_llm_response, summarize_conversation, 
+    validate_api_key, InvalidAPIKeyError
+)
 from .mcp_handler import MCPHandler
 from .prompts import get_system_prompt
 
@@ -104,64 +107,100 @@ async def health_check():
 @app.post("/v1/chat/completions/stream")
 async def stream_completion(request: StreamRequest):
     """Stream chat completions with user-provided credentials."""
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages.extend([msg.dict() for msg in request.messages])
-    
-    # Check conversation limits
-    num_messages = len(messages)
-    estimated_tokens = sum(
-        len(str(msg.get("content", ""))) // 4 for msg in messages
-    )
-    
-    if num_messages > MAX_MESSAGES or estimated_tokens > MAX_TOTAL_TOKENS:
-        warning = {
-            "warning": {
-                "warning": "Conversation length exceeds recommended limits",
-                "suggestions": [
-                    "Summarize the conversation so far and start fresh",
-                    "Keep only the most recent and relevant messages",
-                    "Clear the conversation while preserving system message"
-                ],
-                "details": {
-                    "message_count": num_messages,
-                    "estimated_tokens": estimated_tokens,
-                    "limits": {
-                        "max_messages": MAX_MESSAGES,
-                        "max_tokens": MAX_TOTAL_TOKENS
+    try:
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages.extend([msg.dict() for msg in request.messages])
+        
+        # Check conversation limits
+        num_messages = len(messages)
+        estimated_tokens = sum(
+            len(str(msg.get("content", ""))) // 4 for msg in messages
+        )
+        
+        if num_messages > MAX_MESSAGES or estimated_tokens > MAX_TOTAL_TOKENS:
+            warning = {
+                "warning": {
+                    "warning": "Conversation length exceeds recommended limits",
+                    "suggestions": [
+                        "Summarize the conversation so far and start fresh",
+                        "Keep only the most recent and relevant messages",
+                        "Clear the conversation while preserving system message"
+                    ],
+                    "details": {
+                        "message_count": num_messages,
+                        "estimated_tokens": estimated_tokens,
+                        "limits": {
+                            "max_messages": MAX_MESSAGES,
+                            "max_tokens": MAX_TOTAL_TOKENS
+                        }
                     }
                 }
             }
-        }
+            return StreamingResponse(
+                iter([f"data: {json.dumps(warning)}\n\n"]),
+                media_type="text/event-stream"
+            )
+        
+        async def error_stream(error_msg: str):
+            yield f"data: {json.dumps({'error': error_msg})}\n\n"
+            yield "data: [DONE]\n\n"
+
+        try:
+            # Validate API key before starting stream
+            validate_api_key(request.api_key)
+        except InvalidAPIKeyError as e:
+            return StreamingResponse(
+                error_stream(str(e)),
+                media_type="text/event-stream",
+                status_code=401
+            )
+        
         return StreamingResponse(
-            iter([f"data: {json.dumps(warning)}\n\n"]),
+            stream_llm_response(
+                messages=messages,
+                model=request.model,
+                api_key=request.api_key,
+                api_base_url=request.api_base_url,
+                session_id=request.session_id
+            ),
             media_type="text/event-stream"
         )
-    
-    return StreamingResponse(
-        stream_llm_response(
-            messages=messages,
-            model=request.model,
-            api_key=request.api_key,
-            api_base_url=request.api_base_url,
-            session_id=request.session_id
-        ),
-        media_type="text/event-stream"
-    )
+    except Exception as e:
+        return StreamingResponse(
+            error_stream(str(e)),
+            media_type="text/event-stream",
+            status_code=500
+        )
 
 
 @app.post("/v1/chat/summarize")
 async def summarize(request: SummarizeRequest):
     """Summarize a conversation with user-provided credentials."""
-    messages = [msg.dict() for msg in request.messages]
-    
-    result = await summarize_conversation(
-        messages=messages,
-        model=request.model,
-        api_key=request.api_key,
-        api_base_url=request.api_base_url,
-        session_id=request.session_id
-    )
-    return result
+    try:
+        # Validate API key before proceeding
+        validate_api_key(request.api_key)
+    except InvalidAPIKeyError as e:
+        raise HTTPException(
+            status_code=401,
+            detail=f"API Key Error: {str(e)}"
+        )
+
+    try:
+        messages = [msg.dict() for msg in request.messages]
+        
+        result = await summarize_conversation(
+            messages=messages,
+            model=request.model,
+            api_key=request.api_key,
+            api_base_url=request.api_base_url,
+            session_id=request.session_id
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error during summarization: {str(e)}"
+        )
 
 
 @app.post("/v1/mcp/list_tools")

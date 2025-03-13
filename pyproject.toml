@@ -3,9 +3,9 @@ requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
-name = "nash-llm-server"
+name = "nash-local-server"
 version = "0.1.0"
-description = "Nash LLM Server"
+description = "Nash Local Server"
 authors = ["Nash Team <team@nash.run>"]
 readme = "README.md"
 packages = [{include = "app", from = "."}]

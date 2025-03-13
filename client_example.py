@@ -13,17 +13,17 @@ ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 # Provider-specific models and configurations
 OPENAI_MODELS = [
     "gpt-4-turbo",
-    "gpt-4-0125-preview", 
-    "gpt-4",
-    "gpt-3.5-turbo"
+    "gpt-4o",
+    "o1-preview",
+    "o1-mini",
+    "o3-mini"
 ]
 
 ANTHROPIC_MODELS = [
-    "claude-3-opus-20240229",
-    "claude-3-sonnet-20240229",
-    "claude-3-haiku-20240307",
-    "claude-3-5-sonnet-20241022",
-    "claude-3-5-haiku-20241022"
+    "claude-3-5-sonnet-latest",
+    "claude-3-5-haiku-latest",
+    "claude-3-7-sonnet-latest",
+    "claude-3-7-haiku-latest"
 ]
 
 PROVIDER_BASE_URLS = {
@@ -173,10 +173,12 @@ def stream_response(
     model: str = None,
     session_id: str = None,
     api_key: Optional[str] = None,
-    api_base_url: Optional[str] = None
+    api_base_url: Optional[str] = None,
+    request_id: Optional[str] = None
 ) -> Generator[str, None, None]:
     try:
         print("\n=== Stream Response Start ===")
+        print(f"Request ID: {request_id}")
         print(f"Input session_id: {session_id}")
         print(f"Message count: {len(messages)}")
         if messages:
@@ -188,7 +190,8 @@ def stream_response(
             "session_id": session_id,
             "model": model,
             "api_key": api_key,
-            "api_base_url": api_base_url
+            "api_base_url": api_base_url,
+            "request_id": request_id
         }
             
         print("\nSending request to server...")
@@ -216,6 +219,7 @@ def stream_response(
         first_session_id = None
         last_session_id = None
         chunk_count = 0
+        current_request_id = None
         
         for line in response.iter_lines():
             if line:
@@ -267,6 +271,15 @@ def stream_response(
                                 # Yield session ID tuple immediately
                                 yield "", first_session_id
                             last_session_id = session_id
+                            continue
+                            
+                        if "request_id" in parsed:
+                            current_request_id = parsed["request_id"]
+                            if current_request_id != request_id:
+                                print(
+                                    f"\n⚠️  Request ID mismatch: "
+                                    f"expected {request_id}, got {current_request_id}"
+                                )
                             continue
                             
                         if "content" in parsed:
@@ -367,6 +380,7 @@ def chat_loop():
     conversation = Conversation()
     first_message = True
     message_count = 0
+    request_id = 0  # Initialize request counter
     
     # Get API configuration from environment
     api_config = get_api_config()
@@ -387,7 +401,8 @@ def chat_loop():
     while True:
         try:
             message_count += 1
-            print(f"\n=== Message {message_count} ===")
+            request_id += 1  # Increment request counter
+            print(f"\n=== Message {message_count} (Request {request_id}) ===")
             if conversation.session_id:
                 print(f"Session: {conversation.session_id[:8]}...")
             else:
@@ -472,7 +487,8 @@ def chat_loop():
                 conversation.model,
                 current_session_id,
                 conversation.api_key,
-                conversation.api_base_url
+                conversation.api_base_url,
+                str(request_id)  # Pass request ID
             ):
                 if isinstance(chunk, tuple):
                     # This is the final response tuple
@@ -488,6 +504,92 @@ def chat_loop():
                     response_chunks.append(chunk)
                     response_text += chunk
             print()
+            
+            # Check for function calls in the response
+            if "<function_call>" in response_text:
+                start_tag = "<function_call>"
+                end_tag = "</function_call>"
+                start_idx = response_text.find(start_tag) + len(start_tag)
+                end_idx = response_text.find(end_tag)
+                
+                if start_idx > -1 and end_idx > -1:
+                    json_str = response_text[start_idx:end_idx].strip()
+                    try:
+                        function_calls = json.loads(json_str)
+                        
+                        # Execute each function call
+                        for call in function_calls:
+                            function = call.get("function", {})
+                            tool_name = function.get("name")
+                            arguments = function.get("arguments", {})
+                            
+                            if tool_name:
+                                print(f"\nCalling tool: {tool_name}")
+                                print(f"Arguments: {arguments}")
+                                
+                                try:
+                                    # Make the tool call request
+                                    tool_response = requests.post(
+                                        "http://localhost:6274/v1/mcp/call_tool",
+                                        json={
+                                            "tool_name": tool_name,
+                                            "arguments": arguments
+                                        }
+                                    )
+                                    
+                                    if tool_response.status_code != 200:
+                                        print(
+                                            f"\nError calling tool: "
+                                            f"{tool_response.status_code}"
+                                        )
+                                        continue
+                                        
+                                    tool_result = tool_response.json().get("result")
+                                    print(f"\nTool result: {tool_result}")
+                                    
+                                    # Add tool result to message history
+                                    conversation.add_message(
+                                        "function",
+                                        str(tool_result),
+                                        name=tool_name
+                                    )
+                                    
+                                    # Get LLM's response to the tool result
+                                    request_id += 1  # Increment request counter
+                                    print("\nAssistant:", end=" ", flush=True)
+                                    
+                                    for chunk in stream_response(
+                                        conversation.get_messages(),
+                                        conversation.model,
+                                        conversation.session_id,
+                                        conversation.api_key,
+                                        conversation.api_base_url,
+                                        str(request_id)  # Pass new request ID
+                                    ):
+                                        if isinstance(chunk, tuple):
+                                            response_text, _ = chunk
+                                        else:
+                                            print(chunk, end="", flush=True)
+                                            response_text += chunk
+                                    print()
+                                except requests.exceptions.RequestException as e:
+                                    print(
+                                        f"\nError making tool call request: "
+                                        f"{e}"
+                                    )
+                                    continue
+                    except json.JSONDecodeError as e:
+                        print(
+                            f"\nError parsing function call JSON: "
+                            f"{e}"
+                        )
+                        continue
+                    except Exception as e:
+                        print(
+                            f"\nUnexpected error handling function call: "
+                            f"{e}"
+                        )
+                        continue
             
             # Add assistant's response to history if we got one
             if response_text:

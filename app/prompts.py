@@ -16,24 +16,55 @@ def convert_tools_to_dict(tools_result):
 def format_instructions():
     return """When a user's request requires using a tool, you MUST format your response in two parts:
 
-1. First, make the tool call using this exact format:
-<function_call>[{
+1. First, make ONE and ONLY ONE tool call using this exact format:
+<function_call>
+{
     "function": {
         "name": "tool_name",
-        "arguments": {"arg1": "value1"}
+        "arguments": {
+            "arg1": "value1",
+            "arg2": "value2"
+        }
     }
-}]</function_call>
+}
+</function_call>
 
 2. After making the tool call, wait for the result before continuing the conversation.
 
-For example, if someone asks about the weather, respond like this:
+IMPORTANT RULES:
+- Include ONLY ONE tool call per response
+- Use proper JSON escaping for special characters in strings (especially when including code)
+- For code or text with quotes, escape with backslashes: \\" for quotes, \\\\ for backslashes
+- Ensure all JSON is valid - test your JSON structure mentally before submitting
+- Do not nest additional <function_call> tags inside arguments
+- Format all arguments as proper JSON key-value pairs
+
+Example for a weather request:
 Let me check the weather for you.
-<function_call>[{
+<function_call>
+{
     "function": {
         "name": "get_current_weather",
-        "arguments": {"city": "New York"}
+        "arguments": {
+            "city": "New York"
+        }
     }
-}]</function_call>
+}
+</function_call>
+
+Example with code as an argument:
+I'll run this Python code for you.
+<function_call>
+{
+    "function": {
+        "name": "execute_python",
+        "arguments": {
+            "code": "def hello():\\n    print(\\"Hello, world!\\")\\n\\nhello()",
+            "filename": "hello.py"
+        }
+    }
+}
+</function_call>
 """
 
 

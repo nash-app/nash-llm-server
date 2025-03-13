@@ -64,7 +64,8 @@ async def stream_llm_response(
     model: str = None,
     api_key: str = None,
     api_base_url: str = None,
-    session_id: str = None
+    session_id: str = None,
+    request_id: str = None
 ):
     """Stream responses from the LLM.
 
@@ -74,6 +75,7 @@ async def stream_llm_response(
         api_key: Optional API key override
         api_base_url: Optional API base URL override
         session_id: Optional session ID for tracking
+        request_id: Optional request ID for tracking individual requests
 
     Yields:
         SSE formatted JSON strings with content or error messages
@@ -88,8 +90,11 @@ async def stream_llm_response(
         # Get or create session ID
         session_id = get_session_id(session_id)
 
-        # Send session ID in first chunk
-        yield f"data: {json.dumps({'session_id': session_id})}\n\n"
+        # Send session ID and request ID in first chunk
+        first_chunk = {'session_id': session_id}
+        if request_id:
+            first_chunk['request_id'] = request_id
+        yield f"data: {json.dumps(first_chunk)}\n\n"
 
         response = await acompletion(
             model=model,
@@ -102,19 +107,30 @@ async def stream_llm_response(
             if chunk and hasattr(chunk, 'choices') and chunk.choices:
                 content = chunk.choices[0].delta.content
                 if content:
-                    yield f"data: {json.dumps({'content': content})}\n\n"
+                    chunk_data = {'content': content}
+                    if request_id:
+                        chunk_data['request_id'] = request_id
+                    yield f"data: {json.dumps(chunk_data)}\n\n"
     except InvalidAPIKeyError as e:
         error_msg = f"API Key Error: {str(e)}"
         msg_data = {'error': error_msg}
+        if request_id:
+            msg_data['request_id'] = request_id
         yield f"data: {json.dumps(msg_data)}\n\n"
     except GeneratorExit:
         # Handle generator cleanup gracefully
         return
     except Exception as e:
-        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        error_data = {'error': str(e)}
+        if request_id:
+            error_data['request_id'] = request_id
+        yield f"data: {json.dumps(error_data)}\n\n"
     finally:
-        # Always send DONE with session ID to ensure client has it
-        yield f"data: {json.dumps({'session_id': session_id})}\n\n"
+        # Always send DONE with session ID and request ID
+        final_chunk = {'session_id': session_id}
+        if request_id:
+            final_chunk['request_id'] = request_id
+        yield f"data: {json.dumps(final_chunk)}\n\n"
         yield "data: [DONE]\n\n"
 
 

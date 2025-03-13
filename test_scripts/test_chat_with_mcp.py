@@ -106,7 +106,11 @@ async def execute_tool_call(
     # Get LLM's response to tool result
     request_id += 1
     print(f"\n=== Making LLM Request (ID: {request_id}) ===")
-    print("Getting response to tool result...")
+    print("\nMessages being sent to LLM:")
+    for idx, msg in enumerate(messages, 1):
+        print(f"\n{idx}. Role: {msg['role']}")
+        print(f"Content: {msg['content'][:200]}..." if len(msg['content']) > 200 else f"Content: {msg['content']}")
+    print("\nGetting response from LLM...")
     
     assistant_message = ""
     async for chunk in stream_llm_response(
@@ -179,7 +183,11 @@ async def process_function_call(
         # Get LLM's response to tool result
         request_id += 1
         print(f"\n=== Making LLM Request (ID: {request_id}) ===")
-        print("Getting response to tool result...")
+        print("\nMessages being sent to LLM:")
+        for idx, msg in enumerate(messages, 1):
+            print(f"\n{idx}. Role: {msg['role']}")
+            print(f"Content: {msg['content'][:200]}..." if len(msg['content']) > 200 else f"Content: {msg['content']}")
+        print("\nGetting response from LLM...")
         
         assistant_message = ""
         async for chunk in stream_llm_response(
@@ -233,6 +241,11 @@ async def chat():
             request_id += 1
             
             print(f"\n=== Making LLM Request (ID: {request_id}) ===")
+            print("\nMessages being sent to LLM:")
+            for idx, msg in enumerate(messages, 1):
+                print(f"\n{idx}. Role: {msg['role']}")
+                print(f"Content: {msg['content'][:200]}..." if len(msg['content']) > 200 else f"Content: {msg['content']}")
+            print("\nGetting response from LLM...")
             async for chunk in stream_llm_response(
                 messages,
                 model=config['model'],
@@ -248,14 +261,17 @@ async def chat():
             
             # Process any function calls
             if assistant_message:
-                request_id, assistant_message = await process_function_call(
-                    assistant_message, messages, mcp,
-                    request_id, config['model']
-                )
+                # Add the assistant's response to messages before processing function call
                 messages.append({
                     "role": "assistant",
                     "content": assistant_message
                 })
+                request_id, assistant_message = await process_function_call(
+                    assistant_message, messages, mcp,
+                    request_id, config['model']
+                )
+                # Update the last assistant message with the final response
+                messages[-1]["content"] = assistant_message
             
     except Exception as e:
         print(f"\nError during chat: {e}")

@@ -29,7 +29,8 @@ First, say any additional information you need to say, then make ONE and ONLY ON
 }
 </function_call>
 
-DO NOT SEND A SINGLE CHARACTER AFTER "</function_call>". Your response should end immediately.
+If you are requesting a tool call, DO NOT SEND A SINGLE CHARACTER AFTER "</function_call>". Your response should end immediately.
+If you are being prompted with your latest context as a tool call result, analyze it and continue the conversation naturally.
 
 IMPORTANT RULES:
 - Include ONLY ONE tool call per response

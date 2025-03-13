@@ -1,12 +1,13 @@
 import asyncio
 import json
+from typing import Dict, List, Optional, Any
 
 from app.llm_handler import configure_llm, stream_llm_response
 from app.mcp_handler import MCPHandler
 from app.prompts import get_system_prompt
 
 
-def get_api_config():
+def get_api_config() -> Dict[str, str]:
     """Get API configuration from user input."""
     print("\nChoose API provider:")
     print("1. OpenAI")
@@ -15,41 +16,223 @@ def get_api_config():
     while True:
         choice = input("\nEnter choice (1 or 2): ").strip()
         if choice in ['1', '2']:
-            if choice == '1':
-                provider = 'OpenAI'
-                model = 'o3-mini'
-            else:
-                provider = 'Anthropic'
-                model = 'claude-3-7-sonnet-latest'
-                
+            provider = 'OpenAI' if choice == '1' else 'Anthropic'
+            model = 'o3-mini' if choice == '1' else 'claude-3-7-sonnet-latest'
             api_key = input(f"\nEnter your {provider} API key: ").strip()
+            
             if api_key:
-                return {
-                    'api_key': api_key,
-                    'model': model
-                }
+                return {'api_key': api_key, 'model': model}
         print("Invalid choice or empty API key. Please try again.")
 
 
+async def process_llm_chunk(
+    chunk: str,
+    request_id: int,
+    assistant_message: str
+) -> tuple[str, Optional[str]]:
+    """Process a chunk from the LLM stream.
+    
+    Returns:
+        Tuple of (updated assistant message, error message if any)
+    """
+    if "error" in chunk:
+        return assistant_message, f"\nError: {chunk}"
+        
+    if "[DONE]" in chunk:
+        return assistant_message, None
+        
+    try:
+        parsed = json.loads(chunk.replace("data: ", ""))
+        
+        # Verify request ID if present
+        if "request_id" in parsed:
+            chunk_request_id = parsed["request_id"]
+            if chunk_request_id != str(request_id):
+                print(
+                    f"\n⚠️  Request ID mismatch: expected {request_id}, "
+                    f"got {chunk_request_id}"
+                )
+        
+        content = parsed.get("content", "")
+        print(content, end="", flush=True)
+        return assistant_message + content, None
+        
+    except json.JSONDecodeError as e:
+        return assistant_message, f"\nFailed to parse chunk: {chunk}\nError: {e}"
+
+
+async def execute_tool_call(
+    call_data: Dict[str, Any],
+    mcp: MCPHandler,
+    messages: List[Dict[str, Any]],
+    request_id: int,
+    model: str
+) -> tuple[int, str]:
+    """Execute a tool call and process its result.
+    
+    Returns:
+        Tuple of (new request_id, updated assistant message)
+    """
+    # Parse function call data
+    if isinstance(call_data, str):
+        try:
+            call_data = json.loads(call_data)
+        except json.JSONDecodeError:
+            return request_id, ""
+    
+    function = call_data.get("function", {})
+    tool_name = function.get("name")
+    arguments = function.get("arguments", {})
+    
+    if not tool_name:
+        return request_id, ""
+        
+    print(f"\n=== Making MCP Tool Call: {tool_name} ===")
+    print(f"Arguments: {json.dumps(arguments, indent=2)}")
+    
+    # Execute tool
+    tool_result = await mcp.call_tool(tool_name, arguments=arguments)
+    
+    # Add tool result to message history
+    tool_message = {
+        "role": "assistant",
+        "content": str(tool_result),
+        "tool_calls": [{
+            "id": str(request_id),
+            "type": "function",
+            "function": {
+                "name": tool_name,
+                "arguments": json.dumps(arguments)
+            }
+        }]
+    }
+    messages.append(tool_message)
+    
+    print("\nAssistant: Tool result from {tool_name}:")
+    print(str(tool_result))
+    
+    # Get LLM's response to tool result
+    request_id += 1
+    print(f"\n=== Making LLM Request (ID: {request_id}) ===")
+    print("Getting response to tool result...")
+    
+    assistant_message = ""
+    async for chunk in stream_llm_response(
+        messages,
+        model=model,
+        request_id=str(request_id)
+    ):
+        new_message, error = await process_llm_chunk(
+            chunk, request_id, assistant_message
+        )
+        if error:
+            print(error)
+            break
+        assistant_message = new_message
+            
+    return request_id, assistant_message
+
+
+async def process_function_call(
+    assistant_message: str,
+    messages: List[Dict[str, Any]],
+    mcp: MCPHandler,
+    request_id: int,
+    model: str
+) -> tuple[int, str]:
+    """Process function call in the assistant's message.
+    
+    Returns:
+        Tuple of (new request_id, final assistant message)
+    """
+    if "<function_call>" not in assistant_message:
+        return request_id, assistant_message
+        
+    start_tag = "<function_call>"
+    end_tag = "</function_call>"
+    start_idx = assistant_message.find(start_tag) + len(start_tag)
+    end_idx = assistant_message.find(end_tag)
+    
+    if start_idx <= -1 or end_idx <= -1:
+        return request_id, assistant_message
+        
+    try:
+        json_str = assistant_message[start_idx:end_idx].strip()
+        call_data = json.loads(json_str)
+        
+        # Since we know there's only one function call, we can process it directly
+        function = call_data.get("function", {})
+        tool_name = function.get("name")
+        arguments = function.get("arguments", {})
+        
+        if not tool_name:
+            return request_id, assistant_message
+            
+        print(f"\n=== Making MCP Tool Call: {tool_name} ===")
+        print(f"Arguments: {json.dumps(arguments, indent=2)}")
+        
+        # Execute tool
+        tool_result = await mcp.call_tool(tool_name, arguments=arguments)
+        
+        # Add tool result to message history
+        tool_message = {
+            "role": "assistant",
+            "content": str(tool_result),
+            "tool_calls": [{
+                "id": str(request_id),
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "arguments": json.dumps(arguments)
+                }
+            }]
+        }
+        messages.append(tool_message)
+        
+        print("\nAssistant: Tool result from {tool_name}:")
+        print(str(tool_result))
+        
+        # Get LLM's response to tool result
+        request_id += 1
+        print(f"\n=== Making LLM Request (ID: {request_id}) ===")
+        print("Getting response to tool result...")
+        
+        assistant_message = ""
+        async for chunk in stream_llm_response(
+            messages,
+            model=model,
+            request_id=str(request_id)
+        ):
+            new_message, error = await process_llm_chunk(
+                chunk, request_id, assistant_message
+            )
+            if error:
+                print(error)
+                break
+            assistant_message = new_message
+                
+    except json.JSONDecodeError as e:
+        print(f"\nError parsing function data: {e}")
+    except Exception as e:
+        print(f"\nError executing function: {e}")
+        
+    return request_id, assistant_message
+
+
 async def chat():
-    # Get API configuration from user
+    """Main chat loop."""
+    # Initialize
     config = get_api_config()
     configure_llm(api_key=config['api_key'])
     
-    messages = []
-    request_id = 0  # Initialize request counter
-    
-    # Initialize MCP and get tool definitions
     mcp = MCPHandler.get_instance()
     await mcp.initialize()
-    tools = await mcp.list_tools()
-
-    system_prompt = get_system_prompt(tools)
-
-    messages.append({
+    
+    messages = [{
         "role": "system",
-        "content": system_prompt
-    })
+        "content": get_system_prompt(await mcp.list_tools())
+    }]
+    request_id = 0
     
     try:
         while True:
@@ -58,165 +241,41 @@ async def chat():
             if user_input.lower() in ['quit', 'exit', 'bye']:
                 break
                 
-            # Add user message to history
-            messages.append({
-                "role": "user",
-                "content": user_input
-            })
+            messages.append({"role": "user", "content": user_input})
             
-            # Stream AI response
+            # Get initial LLM response
             print("\nAssistant: ", end="", flush=True)
             assistant_message = ""
-            request_id += 1  # Increment request counter
-            print(f"\n=== Making LLM Request (ID: {request_id}) ===")
+            request_id += 1
             
+            print(f"\n=== Making LLM Request (ID: {request_id}) ===")
             async for chunk in stream_llm_response(
                 messages,
                 model=config['model'],
                 request_id=str(request_id)
             ):
-                if "error" in chunk:
-                    print("\nError:", chunk)
+                new_message, error = await process_llm_chunk(
+                    chunk, request_id, assistant_message
+                )
+                if error:
+                    print(error)
                     break
-                    
-                if "[DONE]" not in chunk:
-                    try:
-                        parsed = json.loads(chunk.replace("data: ", ""))
-                        if "request_id" in parsed:
-                            chunk_request_id = parsed["request_id"]
-                            if chunk_request_id != str(request_id):
-                                print(
-                                    f"\n⚠️  Request ID mismatch: "
-                                    f"expected {request_id}, "
-                                    f"got {chunk_request_id}"
-                                )
-                        content = parsed.get("content", "")
-                        print(content, end="", flush=True)
-                        assistant_message += content
-                    except json.JSONDecodeError as e:
-                        print(f"\nFailed to parse chunk: {chunk}")
-                        print(f"Error: {e}")
+                assistant_message = new_message
             
-            # Add assistant response to history and check for function calls
+            # Process any function calls
             if assistant_message:
-                # Check for function call tag
-                if "<function_call>" in assistant_message:
-                    start_tag = "<function_call>"
-                    end_tag = "</function_call>"
-                    start_idx = (
-                        assistant_message.find(start_tag) + len(start_tag)
-                    )
-                    end_idx = assistant_message.find(end_tag)
-                    
-                    if start_idx > -1 and end_idx > -1:
-                        json_str = assistant_message[start_idx:end_idx].strip()
-                        try:
-                            function_calls = json.loads(json_str)
-                            
-                            # Execute each function call
-                            for call in function_calls:
-                                # Parse function call data
-                                if isinstance(call, str):
-                                    # If the call is a string, try to parse it as JSON
-                                    try:
-                                        call = json.loads(call)
-                                    except json.JSONDecodeError:
-                                        # If it's not JSON, skip this call
-                                        continue
-                                
-                                function = call.get("function", {})
-                                tool_name = function.get("name")
-                                arguments = function.get("arguments", {})
-                                
-                                if tool_name:
-                                    print(f"\n=== Making MCP Tool Call: {tool_name} ===")
-                                    print(f"Arguments: {json.dumps(arguments, indent=2)}")
-                                    
-                                    tool_result = await mcp.call_tool(
-                                        tool_name,
-                                        arguments=arguments
-                                    )
-                                    
-                                    # Add tool result to message history using Claude format
-                                    tool_message = {
-                                        "role": "assistant",
-                                        "content": str(tool_result),  # Use the string result directly
-                                        "tool_calls": [{
-                                            "id": str(request_id),
-                                            "type": "function",
-                                            "function": {
-                                                "name": tool_name,
-                                                "arguments": json.dumps(
-                                                    arguments
-                                                )
-                                            }
-                                        }]
-                                    }
-                                    messages.append(tool_message)
-                                    
-                                    print("\nAssistant: ", end="", flush=True)
-                                    print(f"Tool result from {tool_name}:")
-                                    print(str(tool_result))
-                                    
-                                    # Get LLM's response to the tool result
-                                    request_id += 1
-                                    print(f"\n=== Making LLM Request (ID: {request_id}) ===")
-                                    print("Getting response to tool result...")
-                                    
-                                    async for chunk in stream_llm_response(
-                                        messages,
-                                        model=config['model'],
-                                        request_id=str(request_id)
-                                    ):
-                                        if "error" in chunk:
-                                            print("\nError:", chunk)
-                                            break
-                                            
-                                        if "[DONE]" not in chunk:
-                                            try:
-                                                parsed = json.loads(
-                                                    chunk.replace("data: ", "")
-                                                )
-                                                if "request_id" in parsed:
-                                                    chunk_request_id = (
-                                                        parsed["request_id"]
-                                                    )
-                                                    if chunk_request_id != str(
-                                                        request_id
-                                                    ):
-                                                        print(
-                                                            f"\n⚠️  Request ID "
-                                                            f"mismatch: expected "
-                                                            f"{request_id}, got "
-                                                            f"{chunk_request_id}"
-                                                        )
-                                                content = parsed.get(
-                                                    "content", ""
-                                                )
-                                                print(
-                                                    content, 
-                                                    end="", 
-                                                    flush=True
-                                                )
-                                                assistant_message += content
-                                            except json.JSONDecodeError as e:
-                                                print(
-                                                    f"\nError parsing chunk: {e}"
-                                                )
-                        except json.JSONDecodeError as e:
-                            print(f"\nError parsing function data: {e}")
-                        except Exception as e:
-                            print(f"\nError executing function: {e}")
-                        
+                request_id, assistant_message = await process_function_call(
+                    assistant_message, messages, mcp,
+                    request_id, config['model']
+                )
                 messages.append({
-                    "role": "assistant", 
+                    "role": "assistant",
                     "content": assistant_message
                 })
             
     except Exception as e:
         print(f"\nError during chat: {e}")
     finally:
-        # Clean up MCP
         await mcp.close()
     
     print("\nChat ended.")

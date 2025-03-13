@@ -1,4 +1,3 @@
-import uuid
 from litellm import acompletion
 import litellm
 from dotenv import load_dotenv
@@ -37,11 +36,6 @@ def validate_api_key(api_key: Optional[str] = None) -> None:
         )
 
 
-def get_session_id(session_id: str = None) -> str:
-    """Get session ID, creating a new one if none provided."""
-    return str(uuid.uuid4()) if not session_id else session_id
-
-
 def configure_llm(api_key: str = None, api_base_url: str = None):
     """Configure LiteLLM with API keys and settings."""
     load_dotenv()
@@ -63,7 +57,6 @@ async def stream_llm_response(
     model: str = None,
     api_key: str = None,
     api_base_url: str = None,
-    session_id: str = None
 ):
     """Stream responses from the LLM.
 
@@ -72,7 +65,6 @@ async def stream_llm_response(
         model: Optional model override
         api_key: Optional API key override
         api_base_url: Optional API base URL override
-        session_id: Optional session ID for tracking
 
     Yields:
         Direct chunks from the LiteLLM API
@@ -84,16 +76,13 @@ async def stream_llm_response(
         # Configure LLM with provided credentials
         configure_llm(api_key, api_base_url)
         
-        # Get session ID for tracking
-        session_id = get_session_id(session_id)
-        
         # Create the response stream with stop sequence
         response = await acompletion(
             model=model,
             messages=messages,
             stream=True,
             temperature=0.3,
-            stop=["</tool_call>"],  # Stop after our explicit marker,
+            stop=["</tool_call>"],  # Stop after our explicit marker
             extra_headers=litellm.headers
         )
 
@@ -115,7 +104,6 @@ async def summarize_conversation(
     model: str,
     api_key: str = None,
     api_base_url: str = None,
-    session_id: str = None
 ) -> dict:
     """Summarize a conversation to reduce token count while preserving context."""
     try:
@@ -145,9 +133,6 @@ async def summarize_conversation(
                 )
             }
         ]
-        
-        # Get or create session ID
-        session_id = get_session_id(session_id)
         
         response = await acompletion(
             model=model,
@@ -185,8 +170,7 @@ async def summarize_conversation(
             "token_reduction": {
                 "before": tokens_before,
                 "after": tokens_after
-            },
-            "session_id": session_id
+            }
         }
         
     except Exception as e:

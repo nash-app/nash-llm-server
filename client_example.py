@@ -273,8 +273,47 @@ def stream_response(
                             content = parsed["content"]
                             full_response += content
                             yield content
+                            continue  # Continue to next chunk after handling content
+                        
+                        # Handle tool call events
+                        elif "tool_call" in parsed:
+                            tool_call = parsed["tool_call"]
+                            print("\n\nTOOL CALL DETECTED")
+                            print(f"Tool: {tool_call.get('tool_name', 'Unknown tool')}")
+                            
+                            # Call the tool via the MCP API
+                            tool_name = tool_call.get('tool_name')
+                            arguments = tool_call.get('arguments', {})
+                            
+                            if tool_name:
+                                print(f"Calling tool: {tool_name}")
+                                try:
+                                    # Call the tool via the server API
+                                    tool_result = call_mcp_tool(tool_name, arguments)
+                                    
+                                    # Add the tool result to the conversation
+                                    result_message = f"Tool result: {tool_result}"
+                                    full_response += f"\n{result_message}"
+                                    yield f"\n\nTOOL RESULT: {tool_result}\n\n"
+                                except Exception as e:
+                                    print(f"Error calling tool: {str(e)}")
+                            continue  # Continue to next chunk after handling tool call
+                        
+                        # Handle tool result events
+                        elif "tool_result" in parsed:
+                            tool_result = parsed["tool_result"]
+                            print(f"\n\nTOOL RESULT: {tool_result}\n\n")
+                            yield f"\n{tool_result}\n"
+                            continue  # Continue to next chunk after handling tool result
+                        
+                        # Handle session ID events - already handled above
+                        elif "session_id" in parsed:
+                            # Skip since we already handled this above
+                            continue
+                            
+                        # Unknown chunk type - debug only
                         else:
-                            print(f"\nUnknown chunk type: {parsed}")
+                            print(f"\nDEBUG - Unknown chunk type: {parsed}")
                     except json.JSONDecodeError:
                         print("\nParse error - Invalid JSON")
                         continue
@@ -296,70 +335,95 @@ def stream_response(
         print(f"\nError: {str(e)}")
         return None, None
 
-
-def summarize_conversation(
-    messages: List[Dict[str, str]],
-    model: str = None,
-    session_id: str = None,
-    api_key: Optional[str] = None,
-    api_base_url: Optional[str] = None
-) -> Dict:
-    """Request conversation summarization from the server."""
+def call_mcp_tool(tool_name: str, arguments: dict) -> str:
+    """Call an MCP tool through the server API."""
     try:
         payload = {
-            "messages": messages,
-            "model": model,
-            "session_id": session_id,
-            "api_key": api_key,
-            "api_base_url": api_base_url
+            "tool_name": tool_name,
+            "arguments": arguments
         }
-            
+        
         response = requests.post(
-            "http://localhost:6274/v1/chat/summarize",
+            "http://localhost:6274/v1/mcp/call_tool",
             json=payload
         )
         
         if response.status_code != 200:
-            return {"error": f"Server error: {response.status_code}"}
+            return f"Error calling tool: Server returned status code {response.status_code}"
         
-        return response.json()
-    except requests.exceptions.ConnectionError:
-        return {
-            "error": "Could not connect to server. "
-            "Is it running?"
-        }
+        result = response.json()
+        if "result" in result:
+            return str(result["result"])
+        else:
+            return str(result)
     except Exception as e:
-        return {"error": f"Error: {str(e)}"}
+        return f"Error calling tool: {str(e)}"
 
 
-def print_summarization_result(result: Dict) -> bool:
-    """Print the summarization result in a user-friendly format."""
-    if "error" in result:
-        print(f"\n❌ Summarization failed: {result['error']}")
-        return False
-    
-    if not result.get("success"):
-        print("\n❌ Summarization failed: Unknown error")
-        return False
-    
-    print("\n✨ Conversation summarized successfully!")
-    print("\nSummary:")
-    print("-" * 40)
-    print(result["summary"])
-    print("-" * 40)
-    
-    reduction = result["token_reduction"]
-    saved = reduction["before"] - reduction["after"]
-    percent = (
-        (saved / reduction["before"]) * 100 
-        if reduction["before"] > 0 else 0
-    )
-    
-    print(f"\nToken reduction: {saved} ({percent:.1f}%)")
-    print(f"- Before: {reduction['before']}")
-    print(f"- After: {reduction['after']}")
-    
-    return True
+# Note: Summarize functionality is temporarily disabled
+# def summarize_conversation(
+#     messages: List[Dict[str, str]],
+#     model: str = None,
+#     session_id: str = None,
+#     api_key: Optional[str] = None,
+#     api_base_url: Optional[str] = None
+# ) -> Dict:
+#     """Request conversation summarization from the server."""
+#     try:
+#         payload = {
+#             "messages": messages,
+#             "model": model,
+#             "session_id": session_id,
+#             "api_key": api_key,
+#             "api_base_url": api_base_url
+#         }
+#             
+#         response = requests.post(
+#             "http://localhost:6274/v1/chat/summarize",
+#             json=payload
+#         )
+#         
+#         if response.status_code != 200:
+#             return {"error": f"Server error: {response.status_code}"}
+#         
+#         return response.json()
+#     except requests.exceptions.ConnectionError:
+#         return {
+#             "error": "Could not connect to server. "
+#             "Is it running?"
+#         }
+#     except Exception as e:
+#         return {"error": f"Error: {str(e)}"}
+# 
+# 
+# def print_summarization_result(result: Dict) -> bool:
+#     """Print the summarization result in a user-friendly format."""
+#     if "error" in result:
+#         print(f"\n❌ Summarization failed: {result['error']}")
+#         return False
+#     
+#     if not result.get("success"):
+#         print("\n❌ Summarization failed: Unknown error")
+#         return False
+#     
+#     print("\n✨ Conversation summarized successfully!")
+#     print("\nSummary:")
+#     print("-" * 40)
+#     print(result["summary"])
+#     print("-" * 40)
+#     
+#     reduction = result["token_reduction"]
+#     saved = reduction["before"] - reduction["after"]
+#     percent = (
+#         (saved / reduction["before"]) * 100 
+#         if reduction["before"] > 0 else 0
+#     )
+#     
+#     print(f"\nToken reduction: {saved} ({percent:.1f}%)")
+#     print(f"- Before: {reduction['before']}")
+#     print(f"- After: {reduction['after']}")
+#     
+#     return True
 
 
 def chat_loop():
@@ -378,10 +442,10 @@ def chat_loop():
     print("\n=== Chat Session Started ===")
     print("Commands:")
     print("- 'exit': End the conversation")
-    print("- 'summarize': Summarize conversation to reduce length")
     print("- 'set-api-key <key>': Set API key for requests")
     print("- 'set-base-url <url>': Set API base URL for requests")
     print("- 'set-model <model>': Set model to use for requests")
+    print("- 'list-tools': List available MCP tools")
     print("-" * 60)
     
     while True:
@@ -409,19 +473,25 @@ def chat_loop():
             if user_input.lower() == 'exit':
                 break
             
-            if user_input.lower() == 'summarize':
-                print("\n=== Summarizing Conversation ===")
-                result = summarize_conversation(
-                    conversation.get_messages(),
-                    conversation.model,
-                    conversation.session_id,
-                    conversation.api_key,
-                    conversation.api_base_url
-                )
-                if print_summarization_result(result):
-                    conversation.set_messages(result["messages"])
-                    if "session_id" in result:
-                        conversation.session_id = result["session_id"]
+            if user_input.lower() == 'list-tools':
+                try:
+                    response = requests.post(
+                        "http://localhost:6274/v1/mcp/list_tools"
+                    )
+                    if response.status_code == 200:
+                        result = response.json()
+                        tools = result.get("tools", {})
+                        print("\n=== Available MCP Tools ===")
+                        if hasattr(tools, 'tools'):
+                            for i, tool in enumerate(tools.tools, 1):
+                                print(f"{i}. {tool.name}: {tool.description}")
+                        else:
+                            # Try to print tools directly from the response
+                            print(json.dumps(tools, indent=2))
+                    else:
+                        print(f"Error listing tools: {response.status_code}")
+                except Exception as e:
+                    print(f"Error: {str(e)}")
                 continue
             
             if user_input.lower().startswith('set-api-key '):
@@ -463,7 +533,8 @@ def chat_loop():
             
             # Process the stream response
             response_text = ""
-            response_chunks = []
+            received_tool_result = False
+            tool_result_content = ""
             
             # Collect all chunks from the stream
             got_session_id = False
@@ -484,14 +555,58 @@ def chat_loop():
                         got_session_id = True
                 else:
                     # This is a content chunk
-                    print(chunk, end="", flush=True)
-                    response_chunks.append(chunk)
-                    response_text += chunk
+                    if chunk.startswith("\n\nTOOL RESULT:"):
+                        received_tool_result = True
+                        tool_result_content = chunk
+                    else:
+                        print(chunk, end="", flush=True)
+                        response_text += chunk
             print()
+            
+            # Check if response contains a tool call pattern
+            if "<tool_call>" in response_text and "}" in response_text:
+                print("\nTool call detected in response. Executing...")
+                try:
+                    # Extract the tool call
+                    start_idx = response_text.find("<tool_call>") + len("<tool_call>")
+                    end_idx = response_text.find("}", start_idx) + 1
+                    
+                    if start_idx > 0 and end_idx > start_idx:
+                        tool_call_json = response_text[start_idx:end_idx].strip()
+                        
+                        # Try to parse the JSON
+                        try:
+                            tool_data = json.loads(tool_call_json)
+                            
+                            # Extract tool name and arguments
+                            function = tool_data.get("function", {})
+                            tool_name = function.get("name")
+                            arguments = function.get("arguments", {})
+                            
+                            if tool_name:
+                                print(f"Calling tool: {tool_name}")
+                                
+                                # Call the tool via the server API
+                                tool_result = call_mcp_tool(tool_name, arguments)
+                                
+                                # Display the result
+                                result_message = f"\nTool result: {tool_result}"
+                                print(result_message)
+                                
+                                # Add the tool result to conversation
+                                conversation.add_message("assistant", result_message)
+                        except json.JSONDecodeError:
+                            print("Error: Failed to parse tool call JSON")
+                except Exception as e:
+                    print(f"Error processing tool call: {str(e)}")
             
             # Add assistant's response to history if we got one
             if response_text:
                 conversation.add_message("assistant", response_text)
+            
+            # If we got a tool result from streaming, add it as an assistant message
+            if received_tool_result:
+                conversation.add_message("assistant", tool_result_content)
             
         except KeyboardInterrupt:
             print("\nExiting chat...")

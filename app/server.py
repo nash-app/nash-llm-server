@@ -4,6 +4,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import json
+import uuid
 
 from .llm_handler import (
     stream_llm_response, summarize_conversation, 
@@ -104,6 +105,48 @@ async def health_check():
     return {"status": "ok"}
 
 
+async def process_llm_stream(
+    messages: list,
+    model: str,
+    api_key: str,
+    api_base_url: str,
+    session_id: str = None
+):
+    """Format LLM responses into proper SSE format with session ID."""
+    # Generate or use provided session ID
+    if not session_id:
+        session_id = str(uuid.uuid4())
+    
+    # First chunk with session ID
+    yield f"data: {json.dumps({'session_id': session_id})}\n\n"
+    
+    # Stream content chunks
+    try:
+        async for chunk in stream_llm_response(
+            messages=messages,
+            model=model,
+            api_key=api_key,
+            api_base_url=api_base_url
+        ):
+            # Process the raw LiteLLM chunk
+            if hasattr(chunk, 'choices') and chunk.choices:
+                # Extract the content from the choices
+                delta = chunk.choices[0].delta
+                if hasattr(delta, 'content') and delta.content:
+                    content = delta.content
+                    # Format as SSE event
+                    yield f"data: {json.dumps({'content': content})}\n\n"
+    except Exception as e:
+        # Handle errors in streaming
+        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+    
+    # Last chunk with session ID again
+    yield f"data: {json.dumps({'session_id': session_id})}\n\n"
+    
+    # End of stream marker
+    yield "data: [DONE]\n\n"
+
+
 @app.post("/v1/chat/completions/stream")
 async def stream_completion(request: StreamRequest):
     """Stream chat completions with user-provided credentials."""
@@ -155,8 +198,9 @@ async def stream_completion(request: StreamRequest):
                 status_code=401
             )
         
+        # Use the session handler to format the response
         return StreamingResponse(
-            stream_llm_response(
+            process_llm_stream(
                 messages=messages,
                 model=request.model,
                 api_key=request.api_key,
@@ -173,34 +217,40 @@ async def stream_completion(request: StreamRequest):
         )
 
 
-@app.post("/v1/chat/summarize")
-async def summarize(request: SummarizeRequest):
-    """Summarize a conversation with user-provided credentials."""
-    try:
-        # Validate API key before proceeding
-        validate_api_key(request.api_key)
-    except InvalidAPIKeyError as e:
-        raise HTTPException(
-            status_code=401,
-            detail=f"API Key Error: {str(e)}"
-        )
-
-    try:
-        messages = [msg.dict() for msg in request.messages]
-        
-        result = await summarize_conversation(
-            messages=messages,
-            model=request.model,
-            api_key=request.api_key,
-            api_base_url=request.api_base_url,
-            session_id=request.session_id
-        )
-        return result
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error during summarization: {str(e)}"
-        )
+# @app.post("/v1/chat/summarize")
+# async def summarize(request: SummarizeRequest):
+#     """Summarize a conversation with user-provided credentials."""
+#     try:
+#         # Validate API key before proceeding
+#         validate_api_key(request.api_key)
+#     except InvalidAPIKeyError as e:
+#         raise HTTPException(
+#             status_code=401,
+#             detail=f"API Key Error: {str(e)}"
+#         )
+# 
+#     try:
+#         messages = [msg.dict() for msg in request.messages]
+#         
+#         result = await summarize_conversation(
+#             messages=messages,
+#             model=request.model,
+#             api_key=request.api_key,
+#             api_base_url=request.api_base_url
+#         )
+#         
+#         # Add session ID from server side
+#         if request.session_id:
+#             result["session_id"] = request.session_id
+#         else:
+#             result["session_id"] = str(uuid.uuid4())
+#             
+#         return result
+#     except Exception as e:
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"Error during summarization: {str(e)}"
+#         )
 
 
 @app.post("/v1/mcp/list_tools")
@@ -306,6 +356,10 @@ async def call_tool(request: Request):
 
 def main():
     import uvicorn
+    
+    # Set up the UUID generator function in app state
+    app.state.session_id_generator = lambda: uuid.uuid4()
+    
     uvicorn.run(app, host="0.0.0.0", port=6274)
 
 

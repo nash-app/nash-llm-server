@@ -96,19 +96,11 @@ async def execute_tool_call(
     # Add tool result to message history
     tool_message = {
         "role": "assistant",
-        "content": str(tool_result),
-        "tool_calls": [{
-            "id": str(request_id),
-            "type": "function",
-            "function": {
-                "name": tool_name,
-                "arguments": json.dumps(arguments)
-            }
-        }]
+        "content": str(tool_result)
     }
     messages.append(tool_message)
     
-    print("\nAssistant: Tool result from {tool_name}:")
+    print(f"\nAssistant: Tool result from {tool_name}:")
     print(str(tool_result))
     
     # Get LLM's response to tool result
@@ -160,7 +152,7 @@ async def process_function_call(
         json_str = assistant_message[start_idx:end_idx].strip()
         call_data = json.loads(json_str)
         
-        # Since we know there's only one function call, we can process it directly
+        # Since we know there's only one function call, process it directly
         function = call_data.get("function", {})
         tool_name = function.get("name")
         arguments = function.get("arguments", {})
@@ -177,19 +169,11 @@ async def process_function_call(
         # Add tool result to message history
         tool_message = {
             "role": "assistant",
-            "content": str(tool_result),
-            "tool_calls": [{
-                "id": str(request_id),
-                "type": "function",
-                "function": {
-                    "name": tool_name,
-                    "arguments": json.dumps(arguments)
-                }
-            }]
+            "content": str(tool_result)
         }
         messages.append(tool_message)
         
-        print("\nAssistant: Tool result from {tool_name}:")
+        print(f"\nAssistant: Tool result from {tool_name}:")
         print(str(tool_result))
         
         # Get LLM's response to tool result
@@ -210,7 +194,7 @@ async def process_function_call(
                 print(error)
                 break
             assistant_message = new_message
-                
+            
     except json.JSONDecodeError as e:
         print(f"\nError parsing function data: {e}")
     except Exception as e:

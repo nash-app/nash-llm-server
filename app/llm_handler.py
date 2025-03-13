@@ -76,7 +76,7 @@ async def stream_llm_response(
         session_id: Optional session ID for tracking
 
     Yields:
-        SSE formatted JSON strings with content or error messages
+        Direct chunks from the LiteLLM API
     """
     try:
         if not messages:
@@ -85,12 +85,10 @@ async def stream_llm_response(
         # Configure LLM with provided credentials
         configure_llm(api_key, api_base_url)
         
-        # Get or create session ID
+        # Get session ID for tracking
         session_id = get_session_id(session_id)
-
-        # Send session ID in first chunk
-        yield f"data: {json.dumps({'session_id': session_id})}\n\n"
-
+        
+        # Create the response stream
         response = await acompletion(
             model=model,
             messages=messages,
@@ -98,24 +96,17 @@ async def stream_llm_response(
             temperature=0.7
         )
 
+        # Simply yield each chunk directly
         async for chunk in response:
-            if chunk and hasattr(chunk, 'choices') and chunk.choices:
-                content = chunk.choices[0].delta.content
-                if content:
-                    yield f"data: {json.dumps({'content': content})}\n\n"
-    except InvalidAPIKeyError as e:
-        error_msg = f"API Key Error: {str(e)}"
-        msg_data = {'error': error_msg}
-        yield f"data: {json.dumps(msg_data)}\n\n"
-    except GeneratorExit:
-        # Handle generator cleanup gracefully
-        return
+            yield chunk
+            
     except Exception as e:
-        yield f"data: {json.dumps({'error': str(e)})}\n\n"
-    finally:
-        # Always send DONE with session ID to ensure client has it
-        yield f"data: {json.dumps({'session_id': session_id})}\n\n"
-        yield "data: [DONE]\n\n"
+        # Simple error handling - just print the error
+        print(f"\nError in stream_llm_response: {type(e).__name__}: {str(e)}")
+        print(f"Messages: {len(messages)} items")
+        
+        # Re-raise to let the caller handle it
+        raise
 
 
 async def summarize_conversation(

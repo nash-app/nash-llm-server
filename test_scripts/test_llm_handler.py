@@ -18,14 +18,12 @@ def print_setup_instructions():
     print("```\n")
     print("Then edit .env with your configuration:")
     print("```")
-    print("# OpenAI")
-    print("OPENAI_API_KEY=sk-...        # Required for OpenAI models")
-    print("OPENAI_API_BASE=...          # Optional, defaults to official API")
-    print("\n# Anthropic")
-    print("ANTHROPIC_API_KEY=sk-...     # Required for Anthropic models")
-    print("ANTHROPIC_API_BASE=...       # Optional, defaults to official API")
+    print("# Provider credentials")
+    print("PROVIDER_API_KEY=sk-...      # Required - LLM API key")
+    print("PROVIDER_API_BASE=...        # Required - API base URL (e.g. https://api.anthropic.com)")
+    print("PROVIDER_MODEL=...           # Required - Model to use (e.g. claude-3-sonnet-20240229)")
     print("```")
-    print("\nYou'll be prompted to select a model after setup.")
+    print("\nAll three environment variables are required.")
 
 
 # Available models for each provider
@@ -80,41 +78,29 @@ def get_credentials():
     """Get API credentials from environment variables."""
     load_dotenv()
     
-    # Check for available API keys
-    openai_key = os.getenv("OPENAI_API_KEY")
-    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-    
-    # Determine provider based on available keys
-    if openai_key and anthropic_key:
-        # Both keys available, let user choose
-        provider = get_provider_choice()
-        api_key = openai_key if provider == 'openai' else anthropic_key
-    elif openai_key:
-        provider = 'openai'
-        api_key = openai_key
-    elif anthropic_key:
-        provider = 'anthropic'
-        api_key = anthropic_key
-    else:
-        print("\nError: No API keys found in .env file")
-        print("Please set either OPENAI_API_KEY or ANTHROPIC_API_KEY")
+    # Get provider API key
+    api_key = os.getenv("PROVIDER_API_KEY")
+    if not api_key:
+        print("\nError: No PROVIDER_API_KEY found in .env file")
+        print("Please set PROVIDER_API_KEY in your .env file")
         return None, None, None
     
-    # Set up base URL based on provider
-    if provider == 'openai':
-        api_base_url = os.getenv("OPENAI_API_BASE")
-        if not api_base_url:
-            api_base_url = "https://api.openai.com/v1"
-    else:  # anthropic
-        api_base_url = os.getenv("ANTHROPIC_API_BASE")
-        if not api_base_url:
-            api_base_url = "https://api.anthropic.com"
+    # Get provider base URL
+    api_base_url = os.getenv("PROVIDER_API_BASE")
+    if not api_base_url:
+        print("\nError: No PROVIDER_API_BASE found in .env file")
+        print("Please set PROVIDER_API_BASE in your .env file")
+        return None, None, None
     
-    # Get model choice from user
-    model = get_model_choice(provider)
+    # Get provider model
+    model = os.getenv("PROVIDER_MODEL")
+    if not model:
+        print("\nError: No PROVIDER_MODEL found in .env file")
+        print("Please set PROVIDER_MODEL in your .env file")
+        return None, None, None
     
     print("\nUsing configuration:")
-    print(f"- Provider: {provider.upper()}")
+    print(f"- API Key: {api_key[:6]}...")
     print(f"- Model: {model}")
     print(f"- API Base URL: {api_base_url}")
     

@@ -14,9 +14,9 @@ def convert_tools_to_dict(tools_result):
 
 
 def format_instructions():
-    return """When a user's request requires using a tool, you MUST format your response in two parts:
+    return """When a user's request requires using a tool, you MUST format your response like this:
 
-1. First, make ONE and ONLY ONE tool call using this exact format:
+First, say any additional information you need to say, then make ONE and ONLY ONE tool call using this exact format:
 <function_call>
 {
     "function": {
@@ -29,7 +29,7 @@ def format_instructions():
 }
 </function_call>
 
-2. After making the tool call, wait for the result before continuing the conversation.
+DO NOT SEND A SINGLE CHARACTER AFTER "</function_call>". Your response should end immediately.
 
 IMPORTANT RULES:
 - Include ONLY ONE tool call per response

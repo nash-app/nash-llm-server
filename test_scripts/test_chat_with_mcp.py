@@ -1,38 +1,9 @@
 import asyncio
 import json
-import os
-from dotenv import load_dotenv
 from app.llm_handler import configure_llm, stream_llm_response
 from app.mcp_handler import MCPHandler
 from app.prompts import get_system_prompt
-
-
-def get_api_credentials():
-    """Get API key and base URL from environment variables."""
-    load_dotenv()
-    
-    # Get provider API key
-    api_key = os.getenv("PROVIDER_API_KEY")
-    if not api_key:
-        raise ValueError(
-            "No API key found. Please set PROVIDER_API_KEY in .env file."
-        )
-    
-    # Get provider base URL
-    api_base_url = os.getenv("PROVIDER_API_BASE")
-    if not api_base_url:
-        raise ValueError(
-            "No API base URL found. Please set PROVIDER_API_BASE in .env file."
-        )
-    
-    # Get provider model
-    model = os.getenv("PROVIDER_MODEL")
-    if not model:
-        raise ValueError(
-            "No model specified. Please set PROVIDER_MODEL in .env file."
-        )
-    
-    return api_key, api_base_url, model
+from test_scripts.api_credentials import get_api_credentials, print_credentials_info
 
 
 async def chat():
@@ -42,10 +13,8 @@ async def chat():
     # Configure LLM with credentials
     configure_llm(api_key=api_key, api_base_url=api_base_url)
     
-    print(f"\nUsing configuration:")
-    print(f"- API Key: {api_key[:8]}...")
-    print(f"- API Base URL: {api_base_url}")
-    print(f"- Model: {model}")
+    # Print credentials info
+    print_credentials_info(api_key, api_base_url, model)
     
     messages = []
     

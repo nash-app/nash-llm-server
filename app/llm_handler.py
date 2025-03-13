@@ -88,12 +88,13 @@ async def stream_llm_response(
         # Get session ID for tracking
         session_id = get_session_id(session_id)
         
-        # Create the response stream
+        # Create the response stream with stop sequence
         response = await acompletion(
             model=model,
             messages=messages,
             stream=True,
-            temperature=0.7
+            temperature=0.7,
+            stop=["<STOP_FOR_TOOL_CALL>"]  # Stop after our explicit marker
         )
 
         # Simply yield each chunk directly

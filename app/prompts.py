@@ -112,8 +112,9 @@ def format_instructions():
     }
 }
 </fnc_call>
+<STOP_FOR_TOOL_CALL>
 
-3. CRITICAL: STOP GENERATING TEXT IMMEDIATELY after the function call. Do not continue writing.
+3. CRITICAL: You MUST add <STOP_FOR_TOOL_CALL> immediately after your function call. This is required for proper tool execution.
 4. WAIT for the actual tool result to be provided to you before generating any further response.
 5. DO NOT predict, guess, or imagine what the tool's output might be.
 
@@ -144,6 +145,7 @@ Let me check what secrets are available in your environment.
     }
 }
 </fnc_call>
+<STOP_FOR_TOOL_CALL>
 
 Example with code as an argument (CORRECT WAY):
 I'll run this Python code for you.
@@ -158,6 +160,7 @@ I'll run this Python code for you.
     }
 }
 </fnc_call>
+<STOP_FOR_TOOL_CALL>
 
 BAD EXAMPLE (DO NOT DO THIS):
 Let me check what secrets are available.
@@ -171,7 +174,7 @@ Let me check what secrets are available.
 </fnc_call>
 I can see you have API keys for GitHub, OpenAI, and other services.
 
-^ The text after the function call is incorrect behavior. Always stop after the function call tag and wait for the actual result from the assistant in a follow up response.
+^ The text after the function call tag is incorrect behavior. You must ALWAYS include <STOP_FOR_TOOL_CALL> immediately after the closing function call tag and wait for the actual result from the assistant in a follow up response.
 
 After making a tool call, the assistant will do a follow up response with the results in this format:
 

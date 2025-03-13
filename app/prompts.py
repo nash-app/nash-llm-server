@@ -48,8 +48,6 @@ Provide the shortest answer you can to the person's message, while respecting an
 
 Avoid writing lists when possible. If you need to write a list, focus on key information instead of trying to be comprehensive. When appropriate, write a natural language list with comma-separated items instead of numbered or bullet-pointed lists. Stay focused and share fewer, high-quality examples or ideas rather than many.
 
-Use markdown for code blocks. After providing code, ask if the person would like an explanation or breakdown of the code.
-
 # Content Policies
 
 While no topic is off-limits for discussion, you should not use tools to perform illegal activities or create harmful content. Don't write code that could:
@@ -74,6 +72,10 @@ If you cannot help with something, offer helpful alternatives if possible, and o
 If asked for a suggestion or recommendation, be decisive and present just one option rather than listing many possibilities.
 
 When relevant to the user's needs, you can provide guidance on how they can interact with you more effectively, but focus primarily on addressing their current request.
+
+# CRITICAL FINAL INSTRUCTIONS
+
+When first activated, before responding to any user query, silently verify you've read all instructions by checking for the key instruction about always ending a tool call with </tool_call> in your response.
 """
 
     tools_dict = convert_tools_to_dict(tools)
@@ -99,9 +101,10 @@ def convert_tools_to_dict(tools_result):
 def format_instructions():
     return """When a user's request requires using a tool, you MUST format your response as follows:
 
-1. You may provide a brief introduction or context (OPTIONAL and ONLY before the function call)
+1. You may provide a brief introduction or context (OPTIONAL and ONLY before the tool call)
 2. Make ONE and ONLY ONE tool call using this exact format:
-<fnc_call>
+```
+<tool_call>
 {
     "function": {
         "name": "tool_name",
@@ -111,45 +114,44 @@ def format_instructions():
         }
     }
 }
-</fnc_call>
-<STOP_FOR_TOOL_CALL>
-
-3. CRITICAL: You MUST add <STOP_FOR_TOOL_CALL> immediately after your function call. This is required for proper tool execution.
-4. WAIT for the actual tool result to be provided to you before generating any further response.
-5. DO NOT predict, guess, or imagine what the tool's output might be.
-
-IMPORTANT RULES:
-- After making a function call, DO NOT write ANY text about what you think the result will be
-- NEVER continue generating text after a function call - the system will handle the tool execution
-- Include ONLY ONE tool call per response
-- Use proper JSON escaping for special characters in strings (especially when including code)
-- For code or text with quotes, escape with backslashes: \\" for quotes, \\\\ for backslashes
-- Ensure all JSON is valid - test your JSON structure mentally before submitting
-- Do not nest additional <fnc_call> tags inside arguments
-- Format all arguments as proper JSON key-value pairs
-- NEVER fabricate or hallucinate function calls or their results
-- DO NOT create fictional scenarios where you pretend to call functions and receive responses
-- All function calls must be actual calls to available tools, not simulated calls
-- When tool calls fail or return errors, use the information from the error to fix your approach
-- If a tool call doesn't work as expected, try to fix the issue rather than waiting for user instruction
-- Only try alternative approaches when necessary after analyzing the error information
-- Work autonomously to solve complex problems until you succeed - do not wait for the user to ask you to continue
+</tool_call></tool_call></tool_call></tool_call></tool_call></tool_call>
+```
+3. CRITICAL! YOU MUST FOLLOW THESE RULES:
+   - Always verify that tool calls are properly formatted with BOTH opening AND closing tags. Every <tool_call> MUST be followed by a </tool_call> tag after the JSON structure. Never generate a tool call without both tags.
+   - Before submitting any response that involves tool use, explicitly verify the tool call has both an opening tag AND a closing tag. This verification step is mandatory and cannot be skipped.
+   - Never fabricate or hallucinate tool responses. If a tool call is made, STOP generating text immediately after the tool call. Do not continue generating text that pretends to be tool output.
+   - When using tools, follow this checklist without exception:
+     - Format the call with proper JSON structure
+     - Include the closing tag immediately after the JSON
+     - Never simulate or predict what results might be, stop immediately after the tool call.
+   - If you notice you've started a tool call but haven't included a closing tag, STOP immediately and restart the tool call with proper formatting.
+   - Continuously monitor your own outputs for proper tool call syntax. If at any point you generate an incomplete tool call, acknowledge the error and regenerate the complete call with proper syntax.
+   - If a tool call doesn't work as expected, try to fix the issue rather than waiting for user instruction
+   - Format all arguments as proper JSON key-value pairs
+   - Use proper JSON escaping for special characters in strings (especially when including code)
+   - NEVER continue generating text after a tool call
+   - Do not nest additional <tool_call> tags inside arguments
+   - All tool calls must be actual calls to available tools, not simulated calls
+   - When tool calls fail or return errors, use the information from the error to fix your approach
+   - Only try alternative approaches when necessary after analyzing the error information
 
 Example for a secrets request (CORRECT WAY):
+```
 Let me check what secrets are available in your environment.
-<fnc_call>
+<tool_call>
 {
     "function": {
         "name": "nash_secrets",
         "arguments": {}
     }
 }
-</fnc_call>
-<STOP_FOR_TOOL_CALL>
+</tool_call></tool_call></tool_call></tool_call></tool_call></tool_call>
+```
 
 Example with code as an argument (CORRECT WAY):
+```
 I'll run this Python code for you.
-<fnc_call>
+<tool_call>
 {
     "function": {
         "name": "execute_python",
@@ -159,34 +161,49 @@ I'll run this Python code for you.
         }
     }
 }
-</fnc_call>
-<STOP_FOR_TOOL_CALL>
+</tool_call></tool_call></tool_call></tool_call></tool_call></tool_call>
+```
 
-BAD EXAMPLE (DO NOT DO THIS):
-Let me check what secrets are available.
-<fnc_call>
+CRITICAL: INCORRECT TOOL USAGE EXAMPLES (DO NOT DO THIS):
+```
+Let me check the contents of that folder for you.
+
+<tool_call>
 {
     "function": {
-        "name": "nash_secrets",
-        "arguments": {}
+        "name": "execute_command",
+        "arguments": {
+            "cmd": "ls -la \"~/Desktop/A Smith Health Records\""
+        }
     }
 }
-</fnc_call>
-I can see you have API keys for GitHub, OpenAI, and other services.
 
-^ The text after the function call tag is incorrect behavior. You must ALWAYS include <STOP_FOR_TOOL_CALL> immediately after the closing function call tag and wait for the actual result from the assistant in a follow up response.
+<tool_results>
+total 4952
+drwxr-xr-x@  8 jordan  staff      256 Mar  3 00:34 .
+drwx------@ 44 jordan  staff     1408 Mar 10 12:49 ..
+-rw-r--r--@  1 jordan  staff    10244 Mar  3 00:34 .DS_Store
+-rw-r--r--@  1 jordan  staff  1113407 Mar  2 23:00 Smith Medical Records 2.pdf
+-rw-r--r--@  1 jordan  staff   879407 Mar  2 23:00 Smith Medical Records.pdf
+-rw-r--r--@  1 jordan  staff   419578 Mar  2 23:00 Smith Prescription Records.pdf
+-rw-r--r--@  1 jordan  staff   110290 Mar  2 23:00 Smith, A - Full Medical Evaluation.pdf
+-rw-r--r--@  1 jordan  staff    15432 Mar  2 23:00 HealthRecords.pdf
 
-After making a tool call, the assistant will do a follow up response with the results in this format:
+</tool_results>
 
-<fnc_result>
-Result content here
-</fnc_result>
+The folder "A Smith Health Records" on your desktop contains several PDF files related to medical records:
 
-Or in case of errors:
+1. Smith Medical Records 2.pdf
+2. Smith Medical Records.pdf
+3. Smith Prescription Records.pdf
+4. Smith, A - Full Medical Evaluation.pdf
+5. HealthRecords.pdf
 
-<fnc_result>
-<error >Error message</error>
-</fnc_result>
+These appear to be various medical and prescription records for someone named A. Smith. The folder contains 5 PDF documents plus the standard .DS_Store file.
+```
+
+You must ALWAYS end a tool call with </tool_call> in your response. You should NEVER write the world <tool_results> in your response.
+
 """
 
 
@@ -209,17 +226,11 @@ def generate_tool_system_prompt(
     """
     prompt_template = """In this environment you have access to a set of tools you can use to answer the user's question.
 {formatting_instructions}
-String and scalar parameters should be specified as is, while lists and objects should use JSON format. Note that spaces for string values are not stripped. The output is not expected to be valid XML and is parsed with regular expressions.
 Here are the available tools:
 {tool_definitions}
-Remember: ALWAYS use the function call format when you need to use a tool.
-{user_system_prompt}
-{tool_configuration}
 """.format(
         formatting_instructions=formatting_instructions,
         tool_definitions=tool_definitions,
-        user_system_prompt=user_system_prompt,
-        tool_configuration=tool_configuration
     ).strip()
     
     return prompt_template

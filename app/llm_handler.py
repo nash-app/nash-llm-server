@@ -1,7 +1,6 @@
-from litellm import acompletion
-import json
-import litellm
 import uuid
+from litellm import acompletion
+import litellm
 from dotenv import load_dotenv
 from .prompts import SUMMARIZE_SYSTEM_PROMPT
 from typing import Optional
@@ -93,8 +92,9 @@ async def stream_llm_response(
             model=model,
             messages=messages,
             stream=True,
-            temperature=0.7,
-            stop=["<STOP_FOR_TOOL_CALL>"]  # Stop after our explicit marker
+            temperature=0.3,
+            stop=["</tool_call>"],  # Stop after our explicit marker,
+            extra_headers=litellm.headers
         )
 
         # Simply yield each chunk directly

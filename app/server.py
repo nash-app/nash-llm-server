@@ -7,7 +7,8 @@ import json
 import uuid
 
 from .llm_handler import (
-    stream_llm_response, summarize_conversation, 
+    stream_llm_response, 
+    # summarize_conversation, # Removed summarize functionality
     validate_api_key, InvalidAPIKeyError
 )
 from .mcp_handler import MCPHandler
@@ -70,12 +71,13 @@ class StreamRequest(BaseRequest):
     )
 
 
-class SummarizeRequest(BaseRequest):
-    """Request model for conversation summarization."""
-    model: str = Field(
-        ...,
-        description="Model to use for summarization"
-    )
+# Removed summarize functionality
+# class SummarizeRequest(BaseRequest):
+#     """Request model for conversation summarization."""
+#     model: str = Field(
+#         ...,
+#         description="Model to use for summarization"
+#     )
 
 
 @app.on_event("startup")

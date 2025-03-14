@@ -238,72 +238,6 @@ def call_mcp_tool(tool_name: str, arguments: dict) -> str:
         return f"Error calling tool: {str(e)}"
 
 
-# Note: Summarize functionality is temporarily disabled
-# def summarize_conversation(
-#     messages: List[Dict[str, str]],
-#     model: str = None,
-#     session_id: str = None,
-#     api_key: Optional[str] = None,
-#     api_base_url: Optional[str] = None
-# ) -> Dict:
-#     """Request conversation summarization from the server."""
-#     try:
-#         payload = {
-#             "messages": messages,
-#             "model": model,
-#             "session_id": session_id,
-#             "api_key": api_key,
-#             "api_base_url": api_base_url
-#         }
-#             
-#         response = requests.post(
-#             "http://localhost:6274/v1/chat/summarize",
-#             json=payload
-#         )
-#         
-#         if response.status_code != 200:
-#             return {"error": f"Server error: {response.status_code}"}
-#         
-#         return response.json()
-#     except requests.exceptions.ConnectionError:
-#         return {
-#             "error": "Could not connect to server. "
-#             "Is it running?"
-#         }
-#     except Exception as e:
-#         return {"error": f"Error: {str(e)}"}
-# 
-# 
-# def print_summarization_result(result: Dict) -> bool:
-#     """Print the summarization result in a user-friendly format."""
-#     if "error" in result:
-#         print(f"\n❌ Summarization failed: {result['error']}")
-#         return False
-#     
-#     if not result.get("success"):
-#         print("\n❌ Summarization failed: Unknown error")
-#         return False
-#     
-#     print("\n✨ Conversation summarized successfully!")
-#     print("\nSummary:")
-#     print("-" * 40)
-#     print(result["summary"])
-#     print("-" * 40)
-#     
-#     reduction = result["token_reduction"]
-#     saved = reduction["before"] - reduction["after"]
-#     percent = (
-#         (saved / reduction["before"]) * 100 
-#         if reduction["before"] > 0 else 0
-#     )
-#     
-#     print(f"\nToken reduction: {saved} ({percent:.1f}%)")
-#     print(f"- Before: {reduction['before']}")
-#     print(f"- After: {reduction['after']}")
-#     
-#     return True
-
-
 # Using print_credentials_info imported from api_credentials.py
 
 def chat_loop():
@@ -455,7 +389,7 @@ def chat_loop():
                         conversation.add_message("assistant", f"Tool result: {formatted_result}")
                         
                         # Continue the loop to get another response from the LLM
-                        print("TOOL CALL --------------------------------------------------------")
+                        print("\nTOOL CALL --------------------------------------------------------")
                         print(formatted_result)
                         print("END CALL --------------------------------------------------------")
                         

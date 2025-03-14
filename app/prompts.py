@@ -85,7 +85,6 @@ When first activated, before responding to any user query, silently verify you'v
     ).strip()
 
 
-
 def convert_tools_to_dict(tools_result):
     """Convert MCP tools result to JSON-serializable format."""
     tools = []
@@ -214,13 +213,13 @@ def generate_tool_system_prompt(
     tool_configuration: str = ""
 ) -> str:
     """Generate a system prompt for tool usage in Anthropic's format (https://docs.anthropic.com/en/docs/build-with-claude/tool-use/overview#tool-use-system-prompt)
-    
+
     Args:
         tool_definitions: JSON schema of available tools
         formatting_instructions: Instructions for tool output formatting
         user_system_prompt: Additional system prompt from user
         tool_configuration: Additional tool configuration
-        
+
     Returns:
         Formatted system prompt string
     """
@@ -232,15 +231,5 @@ Here are the available tools:
         formatting_instructions=formatting_instructions,
         tool_definitions=tool_definitions,
     ).strip()
-    
+
     return prompt_template
-
-
-SUMMARIZE_SYSTEM_PROMPT = """
-Summarize the key points of this conversation while preserving important 
-context. Focus on maintaining:
-1. Essential information exchanged
-2. Important decisions or conclusions
-3. Current context needed for continuation
-Be concise but ensure no critical details are lost.
-"""

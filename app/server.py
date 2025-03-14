@@ -4,7 +4,6 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import json
-import uuid
 
 from .llm_handler import (
     stream_llm_response, 
@@ -48,10 +47,6 @@ class BaseRequest(BaseModel):
     messages: List[Message] = Field(
         ...,
         description="List of messages in the conversation"
-    )
-    session_id: Optional[str] = Field(
-        None,
-        description="Optional session ID for tracking"
     )
     api_key: str = Field(
         ...,
@@ -112,16 +107,8 @@ async def process_llm_stream(
     model: str,
     api_key: str,
     api_base_url: str,
-    session_id: str = None
 ):
-    """Format LLM responses into proper SSE format with session ID."""
-    # Generate or use provided session ID
-    if not session_id:
-        session_id = str(uuid.uuid4())
-    
-    # First chunk with session ID
-    yield f"data: {json.dumps({'session_id': session_id})}\n\n"
-    
+    """Format LLM responses into proper SSE format."""
     # Stream content chunks
     try:
         async for chunk in stream_llm_response(
@@ -141,9 +128,6 @@ async def process_llm_stream(
     except Exception as e:
         # Handle errors in streaming
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
-    
-    # Last chunk with session ID again
-    yield f"data: {json.dumps({'session_id': session_id})}\n\n"
     
     # End of stream marker
     yield "data: [DONE]\n\n"
@@ -200,14 +184,13 @@ async def stream_completion(request: StreamRequest):
                 status_code=401
             )
         
-        # Use the session handler to format the response
+        # Format the response
         return StreamingResponse(
             process_llm_stream(
                 messages=messages,
                 model=request.model,
                 api_key=request.api_key,
-                api_base_url=request.api_base_url,
-                session_id=request.session_id
+                api_base_url=request.api_base_url
             ),
             media_type="text/event-stream"
         )
@@ -358,10 +341,6 @@ async def call_tool(request: Request):
 
 def main():
     import uvicorn
-    
-    # Set up the UUID generator function in app state
-    app.state.session_id_generator = lambda: uuid.uuid4()
-    
     uvicorn.run(app, host="0.0.0.0", port=6274)
 
 

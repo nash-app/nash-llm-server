@@ -14,9 +14,6 @@ from .mcp_handler import MCPHandler
 from .prompts import get_system_prompt
 
 
-# Server configuration
-SYSTEM_PROMPT = ""
-
 # Conversation limits
 MAX_MESSAGES = 20  # Maximum number of messages before suggesting summarization
 MAX_TOTAL_TOKENS = 50000  # Approximate token limit before warning
@@ -85,9 +82,8 @@ async def startup_event():
     # Get available tools
     tools = await mcp.list_tools()
 
-    # Generate system prompt with tool definitions
-    global SYSTEM_PROMPT
-    SYSTEM_PROMPT = get_system_prompt(tools)
+    # Generate system prompt with tool definitions and store in app state
+    app.state.system_prompt = get_system_prompt(tools)
 
 
 @app.on_event("shutdown")
@@ -137,7 +133,7 @@ async def process_llm_stream(
 async def stream_completion(request: StreamRequest):
     """Stream chat completions with user-provided credentials."""
     try:
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages = [{"role": "system", "content": app.state.system_prompt}]
         messages.extend([msg.dict() for msg in request.messages])
         
         # Check conversation limits

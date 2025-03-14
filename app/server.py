@@ -4,22 +4,15 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import json
-import uuid
 
 from .llm_handler import (
-    stream_llm_response, summarize_conversation, 
+    stream_llm_response, 
     validate_api_key, InvalidAPIKeyError
 )
 from .mcp_handler import MCPHandler
 from .prompts import get_system_prompt
 
 
-# Server configuration
-SYSTEM_PROMPT = ""
-
-# Conversation limits
-MAX_MESSAGES = 20  # Maximum number of messages before suggesting summarization
-MAX_TOTAL_TOKENS = 50000  # Approximate token limit before warning
 
 app = FastAPI(title="Nash LLM Server")
 
@@ -48,10 +41,6 @@ class BaseRequest(BaseModel):
         ...,
         description="List of messages in the conversation"
     )
-    session_id: Optional[str] = Field(
-        None,
-        description="Optional session ID for tracking"
-    )
     api_key: str = Field(
         ...,
         description="API key to use for the request"
@@ -70,14 +59,6 @@ class StreamRequest(BaseRequest):
     )
 
 
-class SummarizeRequest(BaseRequest):
-    """Request model for conversation summarization."""
-    model: str = Field(
-        ...,
-        description="Model to use for summarization"
-    )
-
-
 @app.on_event("startup")
 async def startup_event():
     """Configure services on server startup."""
@@ -88,9 +69,8 @@ async def startup_event():
     # Get available tools
     tools = await mcp.list_tools()
 
-    # Generate system prompt with tool definitions
-    global SYSTEM_PROMPT
-    SYSTEM_PROMPT = get_system_prompt(tools)
+    # Generate system prompt with tool definitions and store in app state
+    app.state.system_prompt = get_system_prompt(tools)
 
 
 @app.on_event("shutdown")
@@ -110,16 +90,8 @@ async def process_llm_stream(
     model: str,
     api_key: str,
     api_base_url: str,
-    session_id: str = None
 ):
-    """Format LLM responses into proper SSE format with session ID."""
-    # Generate or use provided session ID
-    if not session_id:
-        session_id = str(uuid.uuid4())
-    
-    # First chunk with session ID
-    yield f"data: {json.dumps({'session_id': session_id})}\n\n"
-    
+    """Format LLM responses into proper SSE format."""
     # Stream content chunks
     try:
         async for chunk in stream_llm_response(
@@ -140,9 +112,6 @@ async def process_llm_stream(
         # Handle errors in streaming
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
     
-    # Last chunk with session ID again
-    yield f"data: {json.dumps({'session_id': session_id})}\n\n"
-    
     # End of stream marker
     yield "data: [DONE]\n\n"
 
@@ -151,38 +120,8 @@ async def process_llm_stream(
 async def stream_completion(request: StreamRequest):
     """Stream chat completions with user-provided credentials."""
     try:
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages = [{"role": "system", "content": app.state.system_prompt}]
         messages.extend([msg.dict() for msg in request.messages])
-        
-        # Check conversation limits
-        num_messages = len(messages)
-        estimated_tokens = sum(
-            len(str(msg.get("content", ""))) // 4 for msg in messages
-        )
-        
-        if num_messages > MAX_MESSAGES or estimated_tokens > MAX_TOTAL_TOKENS:
-            warning = {
-                "warning": {
-                    "warning": "Conversation length exceeds recommended limits",
-                    "suggestions": [
-                        "Summarize the conversation so far and start fresh",
-                        "Keep only the most recent and relevant messages",
-                        "Clear the conversation while preserving system message"
-                    ],
-                    "details": {
-                        "message_count": num_messages,
-                        "estimated_tokens": estimated_tokens,
-                        "limits": {
-                            "max_messages": MAX_MESSAGES,
-                            "max_tokens": MAX_TOTAL_TOKENS
-                        }
-                    }
-                }
-            }
-            return StreamingResponse(
-                iter([f"data: {json.dumps(warning)}\n\n"]),
-                media_type="text/event-stream"
-            )
         
         async def error_stream(error_msg: str):
             yield f"data: {json.dumps({'error': error_msg})}\n\n"
@@ -190,7 +129,7 @@ async def stream_completion(request: StreamRequest):
 
         try:
             # Validate API key before starting stream
-            validate_api_key(request.api_key)
+            validate_api_key(request.api_key, request.model)
         except InvalidAPIKeyError as e:
             return StreamingResponse(
                 error_stream(str(e)),
@@ -198,14 +137,13 @@ async def stream_completion(request: StreamRequest):
                 status_code=401
             )
         
-        # Use the session handler to format the response
+        # Format the response
         return StreamingResponse(
             process_llm_stream(
                 messages=messages,
                 model=request.model,
                 api_key=request.api_key,
-                api_base_url=request.api_base_url,
-                session_id=request.session_id
+                api_base_url=request.api_base_url
             ),
             media_type="text/event-stream"
         )
@@ -215,42 +153,6 @@ async def stream_completion(request: StreamRequest):
             media_type="text/event-stream",
             status_code=500
         )
-
-
-# @app.post("/v1/chat/summarize")
-# async def summarize(request: SummarizeRequest):
-#     """Summarize a conversation with user-provided credentials."""
-#     try:
-#         # Validate API key before proceeding
-#         validate_api_key(request.api_key)
-#     except InvalidAPIKeyError as e:
-#         raise HTTPException(
-#             status_code=401,
-#             detail=f"API Key Error: {str(e)}"
-#         )
-# 
-#     try:
-#         messages = [msg.dict() for msg in request.messages]
-#         
-#         result = await summarize_conversation(
-#             messages=messages,
-#             model=request.model,
-#             api_key=request.api_key,
-#             api_base_url=request.api_base_url
-#         )
-#         
-#         # Add session ID from server side
-#         if request.session_id:
-#             result["session_id"] = request.session_id
-#         else:
-#             result["session_id"] = str(uuid.uuid4())
-#             
-#         return result
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Error during summarization: {str(e)}"
-#         )
 
 
 @app.post("/v1/mcp/list_tools")
@@ -356,10 +258,6 @@ async def call_tool(request: Request):
 
 def main():
     import uvicorn
-    
-    # Set up the UUID generator function in app state
-    app.state.session_id_generator = lambda: uuid.uuid4()
-    
     uvicorn.run(app, host="0.0.0.0", port=6274)
 
 

@@ -8,15 +8,20 @@ class InvalidAPIKeyError(Exception):
     pass
 
 
-def validate_api_key(api_key: Optional[str] = None) -> None:
+def validate_api_key(api_key: Optional[str] = None, model: str = None) -> None:
     """Validate that an API key is present and has the correct format.
 
     Args:
         api_key: The API key to validate
+        model: The model being used, to determine validation requirements
 
     Raises:
         InvalidAPIKeyError: If the API key is missing or invalid
     """
+    # Skip validation for Ollama models
+    if model and model.startswith("ollama/"):
+        return
+        
     if not api_key and not litellm.api_key:
         raise InvalidAPIKeyError(
             "No API key provided. Please set a valid API key."
@@ -34,7 +39,7 @@ def validate_api_key(api_key: Optional[str] = None) -> None:
         )
 
 
-def configure_llm(api_key: str = None, api_base_url: str = None):
+def configure_llm(api_key: str = None, api_base_url: str = None, model: str = None):
     """Configure LiteLLM with API keys and settings."""
     load_dotenv()
 
@@ -44,7 +49,7 @@ def configure_llm(api_key: str = None, api_base_url: str = None):
         litellm.api_base = api_base_url
 
     # Validate API key
-    validate_api_key()
+    validate_api_key(api_key, model)
 
     # Initialize headers
     litellm.headers = {}
@@ -72,7 +77,7 @@ async def stream_llm_response(
             messages = []
 
         # Configure LLM with provided credentials
-        configure_llm(api_key, api_base_url)
+        configure_llm(api_key, api_base_url, model)
 
         # Create the response stream with stop sequence
         response = await litellm.acompletion(

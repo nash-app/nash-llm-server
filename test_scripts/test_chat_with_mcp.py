@@ -16,7 +16,7 @@ async def chat():
     api_key, api_base_url, model = get_api_credentials()
     
     # Configure LLM with credentials
-    configure_llm(api_key=api_key, api_base_url=api_base_url)
+    configure_llm(api_key=api_key, api_base_url=api_base_url, model=model)
     
     # Print credentials info
     print_credentials_info(api_key, api_base_url, model)

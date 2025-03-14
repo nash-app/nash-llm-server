@@ -7,7 +7,6 @@ import json
 
 from .llm_handler import (
     stream_llm_response, 
-    # summarize_conversation, # Removed summarize functionality
     validate_api_key, InvalidAPIKeyError
 )
 from .mcp_handler import MCPHandler
@@ -61,15 +60,6 @@ class StreamRequest(BaseRequest):
         ...,
         description="Model to use for completion"
     )
-
-
-# Removed summarize functionality
-# class SummarizeRequest(BaseRequest):
-#     """Request model for conversation summarization."""
-#     model: str = Field(
-#         ...,
-#         description="Model to use for summarization"
-#     )
 
 
 @app.on_event("startup")
@@ -172,7 +162,7 @@ async def stream_completion(request: StreamRequest):
 
         try:
             # Validate API key before starting stream
-            validate_api_key(request.api_key)
+            validate_api_key(request.api_key, request.model)
         except InvalidAPIKeyError as e:
             return StreamingResponse(
                 error_stream(str(e)),
@@ -196,42 +186,6 @@ async def stream_completion(request: StreamRequest):
             media_type="text/event-stream",
             status_code=500
         )
-
-
-# @app.post("/v1/chat/summarize")
-# async def summarize(request: SummarizeRequest):
-#     """Summarize a conversation with user-provided credentials."""
-#     try:
-#         # Validate API key before proceeding
-#         validate_api_key(request.api_key)
-#     except InvalidAPIKeyError as e:
-#         raise HTTPException(
-#             status_code=401,
-#             detail=f"API Key Error: {str(e)}"
-#         )
-# 
-#     try:
-#         messages = [msg.dict() for msg in request.messages]
-#         
-#         result = await summarize_conversation(
-#             messages=messages,
-#             model=request.model,
-#             api_key=request.api_key,
-#             api_base_url=request.api_base_url
-#         )
-#         
-#         # Add session ID from server side
-#         if request.session_id:
-#             result["session_id"] = request.session_id
-#         else:
-#             result["session_id"] = str(uuid.uuid4())
-#             
-#         return result
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Error during summarization: {str(e)}"
-#         )
 
 
 @app.post("/v1/mcp/list_tools")

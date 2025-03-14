@@ -1,13 +1,13 @@
-import json
+from .tool_parser import parse_tool_call, format_tool_result
 
 
 async def process_tool_call(message_text, mcp):
     """
-    Process an assistant's message to identify and execute tool calls.
+    Process an assistant's message to identify and execute tool calls (async version).
     
     Args:
         message_text (str): The assistant's message text
-        mcp: MCPHandler instance
+        mcp: MCPHandler instance for direct async calls
         
     Returns:
         dict: {
@@ -18,61 +18,26 @@ async def process_tool_call(message_text, mcp):
             'formatted_result': str or None
         }
     """
-    # Check if the message contains a function call
-    if "<tool_call>" not in message_text:
+    # Use the shared parser to extract tool information
+    parsed = parse_tool_call(message_text)
+    
+    # If no tool call was found or there was an error, return early
+    if not parsed['tool_call_found']:
         return {
             'tool_call_made': False,
             'tool_name': None,
             'arguments': None,
             'result': None,
-            'formatted_result': None
+            'formatted_result': None,
+            'error': parsed.get('error')
         }
     
-    # Extract the function call JSON
-    start_tag = "<tool_call>"
-    end_tag = "</tool_call>"
-    start_idx = message_text.find(start_tag) + len(start_tag)
-    end_idx = message_text.find(end_tag)
-    
-    if start_idx <= 0 or end_idx <= 0:
-        return {
-            'tool_call_made': False,
-            'tool_name': None,
-            'arguments': None,
-            'result': None,
-            'formatted_result': None
-        }
+    # Extract the parsed information
+    tool_name = parsed['tool_name']
+    arguments = parsed['arguments']
     
     try:
-        # Parse the JSON
-        json_str = message_text[start_idx:end_idx].strip()
-        function_call = json.loads(json_str)
-        
-        # Get function details
-        if isinstance(function_call, list):
-            # Handle the first function call in the list
-            call = function_call[0]
-            function = call.get("function", {})
-        else:
-            # Direct function call object
-            function = function_call.get("function", {})
-        
-        if not isinstance(function, dict):
-            raise ValueError(f"Expected function to be a dict, got: {type(function)}")
-        
-        tool_name = function.get("name")
-        arguments = function.get("arguments", {})
-        
-        if not tool_name:
-            return {
-                'tool_call_made': False,
-                'tool_name': None,
-                'arguments': None,
-                'result': None,
-                'formatted_result': None
-            }
-        
-        # Execute the tool
+        # Execute the tool (async version)
         tool_result = await mcp.call_tool(tool_name, arguments=arguments)
         
         # Extract the text content from the tool result
@@ -93,12 +58,11 @@ async def process_tool_call(message_text, mcp):
         if not result_text:
             result_text = str(tool_result)
         
-        # Format the result
+        # Check if result indicates an error
         is_error = hasattr(tool_result, 'isError') and tool_result.isError
-        if is_error:
-            formatted_result = f"<tool_results>\n<e>{result_text}</e>\n</tool_results>"
-        else:
-            formatted_result = f"<tool_results>\n{result_text}\n</tool_results>"
+        
+        # Use shared formatter for consistent output
+        formatted_result = format_tool_result(result_text, is_error)
         
         return {
             'tool_call_made': True,
@@ -108,20 +72,10 @@ async def process_tool_call(message_text, mcp):
             'formatted_result': formatted_result,
             'is_error': is_error
         }
-        
-    except json.JSONDecodeError as e:
-        return {
-            'tool_call_made': False,
-            'error': f"Error parsing function data: {e}",
-            'tool_name': None,
-            'arguments': None,
-            'result': None,
-            'formatted_result': None
-        }
     except Exception as e:
         return {
             'tool_call_made': False,
-            'error': f"Error executing function: {e}",
+            'error': f"Error executing tool: {e}",
             'tool_name': None,
             'arguments': None,
             'result': None,
